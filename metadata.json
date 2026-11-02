@@ -1,0 +1,6 @@
+{
+  "name": "Gestión de Calidad Médica - Control de Expedientes y Emergencias",
+  "description": "Sistema de registro, seguimiento de cadena de custodia y control de expedientes médicos y emergencias por etapas con roles de acceso y relaciones de entrega oficiales.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
