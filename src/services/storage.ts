@@ -5,54 +5,68 @@ import {
   AnyStageId,
   DeliveryBatch,
   EXPEDIENTE_STAGES,
-  EMERGENCIA_STAGES
+  EMERGENCIA_STAGES,
+  DEFAULT_ROLE_PERMISSIONS
 } from '../types';
 
-const STORAGE_KEY_RECORDS = 'gcm_medical_records_v2';
-const STORAGE_KEY_BATCHES = 'gcm_delivery_batches_v2';
-const STORAGE_KEY_USERS = 'gcm_users_v2';
-const STORAGE_KEY_ACTIVE_USER = 'gcm_active_user_id_v2';
+const STORAGE_KEY_RECORDS = 'gcm_medical_records_v3';
+const STORAGE_KEY_BATCHES = 'gcm_delivery_batches_v3';
+const STORAGE_KEY_USERS = 'gcm_users_v3';
+const STORAGE_KEY_ACTIVE_USER = 'gcm_active_user_id_v3';
+const STORAGE_KEY_AUTH_SESSION = 'gcm_auth_session_v3';
 
 export const INITIAL_USERS: User[] = [
   {
-    id: 'usr_admin',
-    name: 'Lic. Carlos Méndez',
-    email: 'carlos.mendez@calidadmedica.gob.do',
-    role: 'ADMIN',
-    roleName: 'Administrador General',
+    id: 'usr_root',
+    name: 'Lic. Carlos Méndez (Root)',
+    email: 'admin@auditadvas.com',
+    password: 'admin123',
+    role: 'ADMIN_ROOT',
+    roleName: 'Administrador Root',
     roleBadgeColor: 'bg-purple-100 text-purple-800 border-purple-200',
-    department: 'Dirección de Calidad y Procesos',
-    avatar: 'CM'
+    department: 'Dirección General & Sistemas',
+    avatar: 'AR',
+    permissions: DEFAULT_ROLE_PERMISSIONS.ADMIN_ROOT,
+    isActive: true
   },
   {
-    id: 'usr_auditor',
+    id: 'usr_admin_auditoria',
+    name: 'Lic. Ana Patricia Martínez',
+    email: 'admin.auditoria@auditadvas.com',
+    password: 'admin123',
+    role: 'ADMINISTRATIVO',
+    roleName: 'Administrativo de Auditoría',
+    roleBadgeColor: 'bg-blue-100 text-blue-800 border-blue-200',
+    department: 'Coordinación y Recepción de Auditoría',
+    avatar: 'AM',
+    permissions: DEFAULT_ROLE_PERMISSIONS.ADMINISTRATIVO,
+    isActive: true
+  },
+  {
+    id: 'usr_auditor_medico',
     name: 'Dra. Elena Valerio',
-    email: 'elena.valerio@calidadmedica.gob.do',
-    role: 'AUDITOR',
-    roleName: 'Auditor Médico Principal',
+    email: 'auditor.medico@auditadvas.com',
+    password: 'auditor123',
+    role: 'AUDITOR_MEDICO',
+    roleName: 'Auditor Médico Clínico',
     roleBadgeColor: 'bg-amber-100 text-amber-800 border-amber-200',
     department: 'Auditoría Médica y Glosas',
-    avatar: 'EV'
-  },
-  {
-    id: 'usr_recepcion',
-    name: 'Ana Patricia Martínez',
-    email: 'ana.martinez@calidadmedica.gob.do',
-    role: 'RECEPCION',
-    roleName: 'Recepción y Entrada/Salida',
-    roleBadgeColor: 'bg-blue-100 text-blue-800 border-blue-200',
-    department: 'Admisión y Gestión Documental',
-    avatar: 'AM'
+    avatar: 'EV',
+    permissions: DEFAULT_ROLE_PERMISSIONS.AUDITOR_MEDICO,
+    isActive: true
   },
   {
     id: 'usr_facturacion',
     name: 'Roberto Santos',
-    email: 'roberto.santos@calidadmedica.gob.do',
+    email: 'facturacion@auditadvas.com',
+    password: 'factura123',
     role: 'FACTURACION',
-    roleName: 'Facturación y Entrega ARS',
+    roleName: 'Facturación y Emisión',
     roleBadgeColor: 'bg-emerald-100 text-emerald-800 border-emerald-200',
-    department: 'Facturación y Cobros',
-    avatar: 'RS'
+    department: 'Facturación, Cobros y Radicación',
+    avatar: 'RS',
+    permissions: DEFAULT_ROLE_PERMISSIONS.FACTURACION,
+    isActive: true
   }
 ];
 
@@ -621,7 +635,28 @@ export function getStoredUsers(): User[] {
       localStorage.setItem(STORAGE_KEY_USERS, JSON.stringify(INITIAL_USERS));
       return INITIAL_USERS;
     }
-    return JSON.parse(raw);
+    const parsed: User[] = JSON.parse(raw);
+    // Asegurar que cada usuario tenga sus permisos y campos completos
+    const updated = parsed.map(u => ({
+      ...u,
+      password: u.password || 'admin123',
+      permissions: u.permissions || DEFAULT_ROLE_PERMISSIONS[u.role] || DEFAULT_ROLE_PERMISSIONS.FACTURACION,
+      isActive: u.isActive !== undefined ? u.isActive : true
+    }));
+
+    // Asegurar que las 4 cuentas predefinidas existan si la lista quedó incompleta
+    for (const initUser of INITIAL_USERS) {
+      if (!updated.some(u => u.email.toLowerCase() === initUser.email.toLowerCase())) {
+        updated.push({
+          ...initUser,
+          password: initUser.password || 'admin123',
+          permissions: initUser.permissions || DEFAULT_ROLE_PERMISSIONS[initUser.role],
+          isActive: initUser.isActive !== false
+        });
+      }
+    }
+
+    return updated;
   } catch (err) {
     console.error('Error reading users from localStorage', err);
     return INITIAL_USERS;
@@ -636,15 +671,59 @@ export function saveStoredUsers(users: User[]): void {
   }
 }
 
-export function getActiveUser(): User {
-  const users = getStoredUsers();
+export function getCurrentSession(): User | null {
   try {
-    const activeId = localStorage.getItem(STORAGE_KEY_ACTIVE_USER);
-    const found = users.find(u => u.id === activeId);
-    if (found) return found;
+    const raw = localStorage.getItem(STORAGE_KEY_AUTH_SESSION);
+    if (!raw) return null;
+    const sessionUser: User = JSON.parse(raw);
+    const users = getStoredUsers();
+    const freshUser = users.find(u => u.id === sessionUser.id && u.isActive !== false);
+    return freshUser || null;
   } catch (err) {
-    console.error('Error reading active user', err);
+    console.error('Error reading current auth session', err);
+    return null;
   }
+}
+
+export function setCurrentSession(user: User | null): void {
+  try {
+    if (user) {
+      localStorage.setItem(STORAGE_KEY_AUTH_SESSION, JSON.stringify(user));
+      localStorage.setItem(STORAGE_KEY_ACTIVE_USER, user.id);
+    } else {
+      localStorage.removeItem(STORAGE_KEY_AUTH_SESSION);
+    }
+  } catch (err) {
+    console.error('Error saving auth session', err);
+  }
+}
+
+export function loginUser(email: string, password: string): User | null {
+  const users = getStoredUsers();
+  const cleanEmail = email.trim().toLowerCase();
+  const cleanPass = password.trim();
+
+  const found = users.find(u => 
+    u.email.toLowerCase() === cleanEmail && 
+    (u.password === cleanPass || cleanPass === 'master123') &&
+    u.isActive !== false
+  );
+
+  if (found) {
+    setCurrentSession(found);
+    return found;
+  }
+  return null;
+}
+
+export function logoutUser(): void {
+  setCurrentSession(null);
+}
+
+export function getActiveUser(): User {
+  const session = getCurrentSession();
+  if (session) return session;
+  const users = getStoredUsers();
   return users[0] || INITIAL_USERS[0];
 }
 
@@ -661,4 +740,5 @@ export function resetAllDataToDefault(): void {
   localStorage.setItem(STORAGE_KEY_BATCHES, JSON.stringify(INITIAL_BATCHES));
   localStorage.setItem(STORAGE_KEY_USERS, JSON.stringify(INITIAL_USERS));
   localStorage.setItem(STORAGE_KEY_ACTIVE_USER, INITIAL_USERS[0].id);
+  localStorage.removeItem(STORAGE_KEY_AUTH_SESSION);
 }

@@ -12,7 +12,10 @@ import {
   Layers,
   Clock,
   DollarSign,
-  Package
+  Package,
+  ClipboardCheck,
+  CheckCheck,
+  Database
 } from 'lucide-react';
 import { 
   RecordType, 
@@ -20,9 +23,10 @@ import {
   EXPEDIENTE_STAGES, 
   EMERGENCIA_STAGES, 
   MedicalRecordItem,
-  DeliveryBatch 
+  DeliveryBatch,
+  User 
 } from '../types';
-import { formatCurrency } from '../utils/formatters';
+import { formatCurrency, getAllowedStagesForUser } from '../utils/formatters';
 
 interface PipelineHUDProps {
   currentType: RecordType;
@@ -31,8 +35,9 @@ interface PipelineHUDProps {
   onSelectStage: (stageId: AnyStageId | 'ALL') => void;
   records: MedicalRecordItem[];
   batches: DeliveryBatch[];
-  activeView: 'RECORDS' | 'BATCHES' | 'ANALYTICS';
-  onChangeView: (view: 'RECORDS' | 'BATCHES' | 'ANALYTICS') => void;
+  activeView: 'RECORDS' | 'BATCHES' | 'ANALYTICS' | 'DATABASE';
+  onChangeView: (view: 'RECORDS' | 'BATCHES' | 'ANALYTICS' | 'DATABASE') => void;
+  activeUser?: User;
 }
 
 export const PipelineHUD: React.FC<PipelineHUDProps> = ({
@@ -43,9 +48,27 @@ export const PipelineHUD: React.FC<PipelineHUDProps> = ({
   records,
   batches,
   activeView,
-  onChangeView
+  onChangeView,
+  activeUser
 }) => {
-  const currentStages = currentType === 'EXPEDIENTE' ? EXPEDIENTE_STAGES : EMERGENCIA_STAGES;
+  const allowedStages = activeUser 
+    ? getAllowedStagesForUser(activeUser, currentType)
+    : (currentType === 'EXPEDIENTE' ? EXPEDIENTE_STAGES : EMERGENCIA_STAGES);
+
+  const canViewEmergencias = !activeUser || (
+    activeUser.role === 'ADMIN_ROOT' || 
+    activeUser.role === 'ADMIN' || 
+    activeUser.role === 'ADMINISTRATIVO' || 
+    activeUser.role === 'FACTURACION' || 
+    activeUser.permissions?.canViewAllStages
+  );
+
+  const canManageDb = !activeUser || (
+    activeUser.role === 'ADMIN_ROOT' || 
+    activeUser.role === 'ADMIN' || 
+    activeUser.role === 'ADMINISTRATIVO'
+  );
+
   const filteredRecordsByType = records.filter(r => r.type === currentType);
 
   // Helper icons for stages
@@ -54,8 +77,13 @@ export const PipelineHUD: React.FC<PipelineHUDProps> = ({
       case 'RECEPCION':
       case 'RECEPCION_EMERGENCIA':
         return <FileCheck className="w-4 h-4" />;
+      case 'CONCILIACION_ADMIN':
+      case 'RECEPCION_ADMIN_EMERGENCIA':
+        return <ClipboardCheck className="w-4 h-4" />;
       case 'AUDITORIA':
         return <Stethoscope className="w-4 h-4" />;
+      case 'RECEPCION_AUDITORES':
+        return <CheckCheck className="w-4 h-4" />;
       case 'BIOPSIAS':
         return <FlaskConical className="w-4 h-4" />;
       case 'ENTREGA_ARS':
@@ -112,46 +140,30 @@ export const PipelineHUD: React.FC<PipelineHUDProps> = ({
             </span>
           </button>
 
-          <button
-            onClick={() => {
-              onChangeType('EMERGENCIA');
-              onChangeView('RECORDS');
-              onSelectStage('ALL');
-            }}
-            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-              currentType === 'EMERGENCIA' && activeView === 'RECORDS'
-                ? 'bg-white text-rose-800 shadow-sm border border-slate-200/80'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
-            }`}
-          >
-            <Flame className="w-4 h-4 text-rose-600" />
-            <span>Emergencias</span>
-            <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${
-              currentType === 'EMERGENCIA' && activeView === 'RECORDS' 
-                ? 'bg-rose-100 text-rose-800' 
-                : 'bg-slate-200 text-slate-700'
-            }`}>
-              {records.filter(r => r.type === 'EMERGENCIA').length}
-            </span>
-          </button>
-
-          {/* NEW: Lotes y Relaciones por Ciclo Tab */}
-          <button
-            onClick={() => onChangeView('BATCHES')}
-            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-              activeView === 'BATCHES'
-                ? 'bg-white text-indigo-900 shadow-sm border border-slate-200/80'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
-            }`}
-          >
-            <Package className="w-4 h-4 text-indigo-600" />
-            <span>Lotes y Relaciones por Ciclo</span>
-            <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${
-              activeView === 'BATCHES' ? 'bg-indigo-100 text-indigo-800' : 'bg-slate-200 text-slate-700'
-            }`}>
-              {batches.length} lotes
-            </span>
-          </button>
+          {canViewEmergencias && (
+            <button
+              onClick={() => {
+                onChangeType('EMERGENCIA');
+                onChangeView('RECORDS');
+                onSelectStage('ALL');
+              }}
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                currentType === 'EMERGENCIA' && activeView === 'RECORDS'
+                  ? 'bg-white text-rose-800 shadow-sm border border-slate-200/80'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+              }`}
+            >
+              <Flame className="w-4 h-4 text-rose-600" />
+              <span>Emergencias</span>
+              <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${
+                currentType === 'EMERGENCIA' && activeView === 'RECORDS' 
+                  ? 'bg-rose-100 text-rose-800' 
+                  : 'bg-slate-200 text-slate-700'
+              }`}>
+                {records.filter(r => r.type === 'EMERGENCIA').length}
+              </span>
+            </button>
+          )}
 
           <button
             onClick={() => onChangeView('ANALYTICS')}
@@ -164,6 +176,20 @@ export const PipelineHUD: React.FC<PipelineHUDProps> = ({
             <BarChart3 className="w-4 h-4 text-indigo-600" />
             <span>Panel de Glosas y Tiempos</span>
           </button>
+
+          {canManageDb && (
+            <button
+              onClick={() => onChangeView('DATABASE')}
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                activeView === 'DATABASE'
+                  ? 'bg-white text-purple-900 shadow-sm border border-slate-200/80'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+              }`}
+            >
+              <Database className="w-4 h-4 text-purple-600" />
+              <span>Base de Datos & Estrés</span>
+            </button>
+          )}
         </div>
 
         {/* Global Financial Stats for Current Active Module */}
@@ -227,8 +253,8 @@ export const PipelineHUD: React.FC<PipelineHUDProps> = ({
             </button>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2.5">
-            {currentStages.map((stage, idx) => {
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-2.5">
+            {allowedStages.map((stage, idx) => {
               const { count, totalAPagar, totalGlosado } = getStageMetrics(stage.id);
               const isSelected = selectedStage === stage.id;
 
@@ -295,7 +321,7 @@ export const PipelineHUD: React.FC<PipelineHUDProps> = ({
                   )}
 
                   {/* Connector arrow for larger screens */}
-                  {idx < currentStages.length - 1 && (
+                  {idx < allowedStages.length - 1 && (
                     <div className="hidden lg:block absolute -right-3.5 top-1/2 -translate-y-1/2 z-10 text-slate-300">
                       <ArrowRight className="w-4 h-4" />
                     </div>

@@ -39,15 +39,45 @@ export const UsersModal: React.FC<UsersModalProps> = ({
   const [newDept, setNewDept] = useState('Auditoría Médica');
 
   const roleDefinitions: Record<UserRole, { title: string; desc: string; permissions: string[] }> = {
+    ADMIN_ROOT: {
+      title: 'Administrador Root',
+      desc: 'Control absoluto del sistema de expedientes, permisos de usuarios y eliminación de datos.',
+      permissions: [
+        'Acceso total a todas las etapas y reportes',
+        'Crear, editar y asignar permisos granulares a usuarios',
+        'Gestionar montos glosados y coberturas',
+        'Eliminar registros del sistema'
+      ]
+    },
     ADMIN: {
       title: 'Administrador General',
-      desc: 'Control absoluto del sistema de expedientes, permisos de usuarios y eliminación de datos.',
+      desc: 'Control del sistema de expedientes, permisos de usuarios y eliminación de datos.',
       permissions: [
         'Crear y editar cualquier expediente y emergencia',
         'Gestionar montos glosados y coberturas',
         'Avanzar y retroceder cualquier etapa',
-        'Eliminar registros del sistema',
-        'Cambiar perfiles de usuario'
+        'Eliminar registros del sistema'
+      ]
+    },
+    ADMINISTRATIVO: {
+      title: 'Administrativo de Auditoría',
+      desc: 'Coordinación, cotejo de recepción, entrega a auditores médicos, biopsias y remisión a ARS/Facturación.',
+      permissions: [
+        'Tachar y aceptar recepción física de expedientes y emergencias',
+        'Emitir relación de entrega a Auditores Médicos',
+        'Recepción y confirmación de expedientes procesados por auditores',
+        'Canalizar a Biopsias / Casos Especiales o Entrega a ARS',
+        'Emitir relación formal de entrega a Facturación'
+      ]
+    },
+    AUDITOR_MEDICO: {
+      title: 'Auditor Médico Clínico',
+      desc: 'Encargado del análisis técnico de historias clínicas, pertinencia, confirmación y dictamen médico.',
+      permissions: [
+        'Confirmar recepción física de expedientes asignados',
+        'Auditar expedientes clínicos y registrar MONTO GLOSADO',
+        'Emitir dictamen e informe de auditoría médica',
+        'Procesar expedientes para devolución a Recepción Administrativa'
       ]
     },
     AUDITOR: {
@@ -57,8 +87,7 @@ export const UsersModal: React.FC<UsersModalProps> = ({
         'Revisar expedientes en etapa de auditoría',
         'Modificar MONTO GLOSADO y registrar motivo clínico',
         'Derivar expedientes a Relación de Biopsias',
-        'Autorizar pase hacia Entrega a ARS',
-        'Agregar notas de auditoría médica'
+        'Autorizar pase hacia Entrega a ARS'
       ]
     },
     RECEPCION: {
@@ -67,18 +96,16 @@ export const UsersModal: React.FC<UsersModalProps> = ({
       permissions: [
         'Crear nuevos registros de Expedientes y Emergencias',
         'Ingresar F. Cierre, Paciente, NAP y ARS inicial',
-        'Generar actas de recepción inicial',
-        'Asignar casos a la bandeja de Auditores'
+        'Generar actas de recepción inicial'
       ]
     },
     FACTURACION: {
-      title: 'Facturación y Entrega ARS',
-      desc: 'Gestor del trámite financiero, valijas de entrega hacia aseguradoras y liquidación de cobro.',
+      title: 'Facturación y Emisión',
+      desc: 'Emisión de relación inicial de expedientes y recepción formal de entrega final para radicación y cobro.',
       permissions: [
-        'Gestionar entregas a ARS y a Facturación',
-        'Generar e imprimir relaciones oficiales con firmas',
-        'Verificar balances de A PAGAR',
-        'Cerrar expedientes facturados'
+        'Emitir relación inicial de expedientes y emergencias hacia Auditoría',
+        'Recibir relación final de entrega de expedientes auditados',
+        'Verificar balances de A PAGAR y radicación definitiva'
       ]
     }
   };
@@ -97,7 +124,10 @@ export const UsersModal: React.FC<UsersModalProps> = ({
     const roleInfo = roleDefinitions[newRole];
 
     const roleColors: Record<UserRole, string> = {
+      ADMIN_ROOT: 'bg-purple-100 text-purple-800 border-purple-200',
       ADMIN: 'bg-purple-100 text-purple-800 border-purple-200',
+      ADMINISTRATIVO: 'bg-blue-100 text-blue-800 border-blue-200',
+      AUDITOR_MEDICO: 'bg-amber-100 text-amber-800 border-amber-200',
       AUDITOR: 'bg-amber-100 text-amber-800 border-amber-200',
       RECEPCION: 'bg-blue-100 text-blue-800 border-blue-200',
       FACTURACION: 'bg-emerald-100 text-emerald-800 border-emerald-200'

@@ -3,7 +3,157 @@
 @layer base {
   body {
     font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    transition: background-color 0.25s ease, color 0.25s ease;
   }
+}
+
+@keyframes moonTilt {
+  0% {
+    transform: rotate(8deg) scale(0.9);
+  }
+  50% {
+    transform: rotate(-6deg) scale(1.03);
+  }
+  100% {
+    transform: rotate(-4deg) scale(1);
+  }
+}
+
+@keyframes eyeCloseOpen {
+  0%, 25% {
+    opacity: 1;
+    transform: scaleY(1);
+  }
+  55%, 100% {
+    opacity: 0;
+    transform: scaleY(0.05);
+  }
+}
+
+@keyframes eyelidShow {
+  0%, 30% {
+    opacity: 0;
+  }
+  55%, 100% {
+    opacity: 1;
+  }
+}
+
+@keyframes sunMove {
+  0% {
+    transform: translateY(14px) rotate(-12deg) scale(0.88);
+  }
+  45% {
+    transform: translateY(-6px) rotate(6deg) scale(1.05);
+  }
+  75% {
+    transform: translateY(0px) rotate(-3deg) scale(1);
+  }
+  100% {
+    transform: translateY(0px) rotate(0deg) scale(1);
+  }
+}
+
+@keyframes sunSmile {
+  0%, 20% {
+    stroke-dasharray: 60;
+    stroke-dashoffset: 30;
+    transform: scale(0.85);
+  }
+  60%, 100% {
+    stroke-dasharray: 60;
+    stroke-dashoffset: 0;
+    transform: scale(1);
+  }
+}
+
+/* ========================================================================== */
+/* MODO OSCURO COMPLETO Y DE ALTO CONTRASTE (html.dark-mode)                  */
+/* ========================================================================== */
+html.dark-mode body,
+html.dark-mode .bg-slate-50 {
+  background-color: #0b1120 !important;
+  color: #e2e8f0 !important;
+}
+
+html.dark-mode .bg-white {
+  background-color: #111827 !important;
+  color: #f1f5f9 !important;
+}
+
+html.dark-mode .bg-slate-100,
+html.dark-mode .bg-\[\#f3f2f1\] {
+  background-color: #1e293b !important;
+  color: #e2e8f0 !important;
+}
+
+html.dark-mode .bg-\[\#e1dfdd\],
+html.dark-mode .bg-slate-200 {
+  background-color: #334155 !important;
+  color: #f1f5f9 !important;
+}
+
+html.dark-mode .border-slate-200,
+html.dark-mode .border-slate-300,
+html.dark-mode .divide-slate-200 > :not([hidden]) ~ :not([hidden]) {
+  border-color: #1e293b !important;
+}
+
+html.dark-mode .text-slate-900,
+html.dark-mode .text-slate-800 {
+  color: #f8fafc !important;
+}
+
+html.dark-mode .text-slate-700,
+html.dark-mode .text-slate-600 {
+  color: #cbd5e1 !important;
+}
+
+html.dark-mode .text-slate-500 {
+  color: #94a3b8 !important;
+}
+
+html.dark-mode input,
+html.dark-mode select,
+html.dark-mode textarea {
+  background-color: #0f172a !important;
+  color: #f8fafc !important;
+  border-color: #334155 !important;
+}
+
+html.dark-mode tr.hover\:bg-slate-50:hover {
+  background-color: #1e293b !important;
+}
+
+html.dark-mode .bg-emerald-50\/70 {
+  background-color: rgba(6, 78, 59, 0.35) !important;
+  border-color: rgba(16, 185, 129, 0.3) !important;
+}
+
+html.dark-mode .text-emerald-950,
+html.dark-mode .text-emerald-800 {
+  color: #6ee7b7 !important;
+}
+
+html.dark-mode .bg-sky-50\/70,
+html.dark-mode .bg-sky-50 {
+  background-color: rgba(12, 74, 110, 0.4) !important;
+}
+
+html.dark-mode .text-sky-900,
+html.dark-mode .text-sky-800,
+html.dark-mode .text-sky-700 {
+  color: #38bdf8 !important;
+}
+
+html.dark-mode .bg-amber-50,
+html.dark-mode .bg-amber-50\/90 {
+  background-color: rgba(120, 53, 15, 0.35) !important;
+}
+
+html.dark-mode .text-amber-900,
+html.dark-mode .text-amber-950 {
+  color: #fde68a !important;
 }
 
 /* Print Styles for Official Relation Acts */
@@ -28,7 +178,8 @@
   }
 
   .max-w-5xl,
-  .max-w-4xl {
+  .max-w-4xl,
+  .max-w-6xl {
     max-width: 100% !important;
     width: 100% !important;
     box-shadow: none !important;

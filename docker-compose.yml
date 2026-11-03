@@ -1,0 +1,15 @@
+services:
+  auditadvas:
+    image: auditadvas-auditadvas
+    build: .
+    container_name: auditadvas-app
+    restart: always
+    ports:
+      - "4000:4000"
+    environment:
+      - NODE_ENV=production
+      - PORT=4000
+    volumes:
+      - ./data:/app/data
+      - ./dist:/app/dist
+      - ./server:/app/server

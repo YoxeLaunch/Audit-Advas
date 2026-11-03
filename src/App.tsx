@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   RecordType, 
   AnyStageId, 
@@ -6,43 +6,102 @@ import {
   User, 
   RecordNote,
   StageHistoryItem,
-  DeliveryBatch
+  DeliveryBatch,
+  ArsExpirationConfig,
+  COMMON_ARS_LIST
 } from './types';
 import { 
   getStoredRecords, 
   saveStoredRecords, 
   getStoredBatches,
-  saveStoredBatches,
+  saveStoredBatches, 
   getStoredUsers, 
   saveStoredUsers, 
-  getActiveUser, 
-  setActiveUser as persistActiveUser,
+  getCurrentSession,
+  setCurrentSession,
+  logoutUser,
   resetAllDataToDefault 
 } from './services/storage';
-import { getNextStage, getStageConfig } from './utils/formatters';
-import { Header } from './components/Header';
+import { getNextStage, getStageConfig, formatCurrency } from './utils/formatters';
+import { Header, AreaNotificationItem } from './components/Header';
 import { PipelineHUD } from './components/PipelineHUD';
 import { TableView } from './components/TableView';
 import { RecordModal } from './components/RecordModal';
 import { NotesModal } from './components/NotesModal';
 import { OfficialRelationModal } from './components/OfficialRelationModal';
-import { UsersModal } from './components/UsersModal';
+import { UserManagementModal } from './components/UserManagementModal';
+import { AuditProcessModal } from './components/AuditProcessModal';
+import { ArsConfigModal } from './components/ArsConfigModal';
+import { ThemeCurtainTransition } from './components/ThemeCurtainTransition';
+import { LoginView } from './components/LoginView';
 import { AnalyticsView } from './components/AnalyticsView';
 import { BatchesView } from './components/BatchesView';
 import { CreateBatchModal } from './components/CreateBatchModal';
+import { DatabasePerformanceView } from './components/DatabasePerformanceView';
+import { 
+  apiFetchRecords, 
+  apiCreateRecord, 
+  apiUpdateRecord, 
+  apiDeleteRecord, 
+  apiBulkConciliate,
+  apiFetchArsConfig,
+  apiSaveArsConfig,
+  apiFetchUsers,
+  apiCreateUser,
+  apiUpdateUser,
+  apiResetCleanRecords
+} from './services/apiService';
 
 export default function App() {
-  // Primary State
-  const [records, setRecords] = useState<MedicalRecordItem[]>([]);
-  const [batches, setBatches] = useState<DeliveryBatch[]>([]);
-  const [users, setUsers] = useState<User[]>([]);
-  const [activeUser, setActiveUserState] = useState<User | null>(null);
+  // Primary State inicializado de forma síncrona
+  const [users, setUsers] = useState<User[]>(() => {
+    try {
+      return getStoredUsers();
+    } catch {
+      return [];
+    }
+  });
+
+  const [activeUser, setActiveUserState] = useState<User | null>(() => {
+    try {
+      const session = getCurrentSession();
+      if (session) return session;
+      const loadedUsers = getStoredUsers();
+      return loadedUsers[0] || null;
+    } catch {
+      return null;
+    }
+  });
+
+  const [records, setRecords] = useState<MedicalRecordItem[]>(() => {
+    try {
+      return getStoredRecords();
+    } catch {
+      return [];
+    }
+  });
+
+  const [batches, setBatches] = useState<DeliveryBatch[]>(() => {
+    try {
+      return getStoredBatches();
+    } catch {
+      return [];
+    }
+  });
+
+  const [arsConfigs, setArsConfigs] = useState<ArsExpirationConfig[]>(() =>
+    COMMON_ARS_LIST.map(name => ({
+      ars_name: name,
+      short_name: name,
+      dias_vigencia: name === 'PRIMERA' || name === 'HUMANO' || name === 'UNIVERSAL' ? 90 : 60
+    }))
+  );
 
   // View & Filter State
   const [currentType, setCurrentType] = useState<RecordType>('EXPEDIENTE');
   const [selectedStage, setSelectedStage] = useState<AnyStageId | 'ALL'>('ALL');
   const [selectedBatchFilter, setSelectedBatchFilter] = useState<string | 'ALL'>('ALL');
-  const [activeView, setActiveView] = useState<'RECORDS' | 'BATCHES' | 'ANALYTICS'>('RECORDS');
+  const [activeView, setActiveView] = useState<'RECORDS' | 'BATCHES' | 'ANALYTICS' | 'DATABASE'>('RECORDS');
 
   // Modals State
   const [recordModalOpen, setRecordModalOpen] = useState(false);
@@ -51,21 +110,186 @@ export default function App() {
   const [selectedRecordForNotes, setSelectedRecordForNotes] = useState<MedicalRecordItem | null>(null);
   const [createBatchModalOpen, setCreateBatchModalOpen] = useState(false);
   const [officialReportModalOpen, setOfficialReportModalOpen] = useState(false);
+  const [userManagementModalOpen, setUserManagementModalOpen] = useState(false);
+  const [arsConfigModalOpen, setArsConfigModalOpen] = useState(false);
+  
+  // Audit Process Modal
+  const [auditModalOpen, setAuditModalOpen] = useState(false);
+  const [selectedRecordForAudit, setSelectedRecordForAudit] = useState<MedicalRecordItem | null>(null);
+
   const [reportData, setReportData] = useState<{
     records: MedicalRecordItem[];
     title: string;
     ars: string;
     deliveryDate: string;
+    stage?: AnyStageId | 'ALL';
+    auditorName?: string;
+    deliveredBy?: string;
+    receivedBy?: string;
   }>({
     records: [],
     title: '',
-    ars: 'ARS SENASA',
-    deliveryDate: '2026-10-31'
+    ars: 'SENASA',
+    deliveryDate: new Date().toISOString().split('T')[0]
   });
-  const [usersModalOpen, setUsersModalOpen] = useState(false);
 
-  // Toast Notification state
+  // Toast Notification state (No invasiva)
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [subtleAreaAlert, setSubtleAreaAlert] = useState<AreaNotificationItem | null>(null);
+
+  // Estado de Modo Claro / Modo Oscuro y Cortina de Transición
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    try {
+      return localStorage.getItem('gcm_theme') === 'dark' ? 'dark' : 'light';
+    } catch {
+      return 'light';
+    }
+  });
+  const [curtainPhase, setCurtainPhase] = useState<'IDLE' | 'CLOSING' | 'HOLD' | 'OPENING'>('IDLE');
+  const [targetTheme, setTargetTheme] = useState<'light' | 'dark'>('dark');
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark-mode', theme === 'dark');
+  }, [theme]);
+
+  const handleToggleTheme = () => {
+    if (curtainPhase !== 'IDLE') return;
+    const nextTheme = theme === 'dark' ? 'light' : 'dark';
+    setTargetTheme(nextTheme);
+    setCurtainPhase('CLOSING');
+
+    setTimeout(() => {
+      setCurtainPhase('HOLD');
+      setTheme(nextTheme);
+      try {
+        localStorage.setItem('gcm_theme', nextTheme);
+      } catch {}
+      document.documentElement.classList.toggle('dark-mode', nextTheme === 'dark');
+    }, 520);
+
+    setTimeout(() => {
+      setCurtainPhase('OPENING');
+    }, 1250);
+
+    setTimeout(() => {
+      setCurtainPhase('IDLE');
+    }, 1780);
+  };
+
+  // Notificaciones por Área Receptora (No Invasivas)
+  const areaNotifications = useMemo<AreaNotificationItem[]>(() => {
+    if (!activeUser) return [];
+    const list: AreaNotificationItem[] = [];
+    const role = activeUser.role;
+
+    // 1. Área Administrativa: Recibe relaciones emitidas por Facturación y retornos de Auditores
+    if (role === 'ADMINISTRATIVO' || role === 'ADMIN_ROOT' || role === 'ADMIN') {
+      const recFromBilling = records.filter(
+        r => r.type === 'EXPEDIENTE' && (r.currentStage === 'RECEPCION' || r.currentStage === 'CONCILIACION_ADMIN') && !r.conciliadoAdmin
+      );
+      if (recFromBilling.length > 0) {
+        list.push({
+          id: 'notif_admin_recepcion',
+          title: 'Relación de Recepción (Expedientes)',
+          subtitle: 'Pendientes de tachar y aceptar llegada física en Auditoría',
+          sender: recFromBilling[0].createdBy || 'Facturación',
+          targetStage: 'RECEPCION',
+          targetType: 'EXPEDIENTE',
+          count: recFromBilling.length,
+          badgeColor: 'bg-sky-100 text-sky-800 border border-sky-300'
+        });
+      }
+
+      const recFromAuditors = records.filter(
+        r => r.type === 'EXPEDIENTE' && r.currentStage === 'RECEPCION_AUDITORES'
+      );
+      if (recFromAuditors.length > 0) {
+        list.push({
+          id: 'notif_admin_auditores',
+          title: 'Retorno de Auditores Médicos',
+          subtitle: 'Expedientes auditados listos para enviar a ARS o Biopsias',
+          sender: recFromAuditors[0].auditorAsignadoNombre || 'Auditoría Médica',
+          targetStage: 'RECEPCION_AUDITORES',
+          targetType: 'EXPEDIENTE',
+          count: recFromAuditors.length,
+          badgeColor: 'bg-teal-100 text-teal-800 border border-teal-300'
+        });
+      }
+
+      const recBiopsias = records.filter(
+        r => r.type === 'EXPEDIENTE' && r.currentStage === 'BIOPSIAS' && !r.biopsiaCompletada
+      );
+      if (recBiopsias.length > 0) {
+        list.push({
+          id: 'notif_admin_biopsias',
+          title: 'Seguimiento de Biopsias Activas',
+          subtitle: 'Casos en espera de reporte de histopatología',
+          sender: 'Administrativo / Patología',
+          targetStage: 'BIOPSIAS',
+          targetType: 'EXPEDIENTE',
+          count: recBiopsias.length,
+          badgeColor: 'bg-purple-100 text-purple-800 border border-purple-300'
+        });
+      }
+    }
+
+    // 2. Área Auditor Médico: Recibe expedientes asignados por Administrativo
+    if (role === 'AUDITOR_MEDICO' || role === 'AUDITOR' || role === 'ADMIN_ROOT') {
+      const assignedToAuditor = records.filter(
+        r =>
+          r.type === 'EXPEDIENTE' &&
+          r.currentStage === 'AUDITORIA' &&
+          !r.auditoriaProcesada &&
+          (role === 'ADMIN_ROOT' || !r.auditorAsignadoNombre || r.auditorAsignadoNombre === activeUser.name)
+      );
+      if (assignedToAuditor.length > 0) {
+        list.push({
+          id: 'notif_auditor_pendientes',
+          title: 'Expedientes Recibidos para Auditar',
+          subtitle: 'Pendientes de revisión médica, glosas y emisión de reporte',
+          sender: assignedToAuditor[0].conciliadoPor || 'Administrativo de Auditoría',
+          targetStage: 'AUDITORIA',
+          targetType: 'EXPEDIENTE',
+          count: assignedToAuditor.length,
+          badgeColor: 'bg-amber-100 text-amber-900 border border-amber-300'
+        });
+      }
+    }
+
+    // 3. Área Facturación: Recibe entrega final de expedientes y emergencias desde Auditoría
+    if (role === 'FACTURACION' || role === 'ADMIN_ROOT') {
+      const finalBillingExp = records.filter(
+        r => r.type === 'EXPEDIENTE' && r.currentStage === 'FACTURACION' && !r.facturacionConfirmada
+      );
+      if (finalBillingExp.length > 0) {
+        list.push({
+          id: 'notif_facturacion_final',
+          title: 'Entrega Final a Facturación',
+          subtitle: 'Expedientes auditados listos para recibir y radicar',
+          sender: finalBillingExp[0].entregadoFacturacionPor || 'Administrativo de Auditoría',
+          targetStage: 'FACTURACION',
+          targetType: 'EXPEDIENTE',
+          count: finalBillingExp.length,
+          badgeColor: 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+        });
+      }
+    }
+
+    return list;
+  }, [activeUser, records]);
+
+  // Al cambiar de usuario/rol, mostrar aviso sutil y no invasivo si su área tiene recepciones pendientes
+  useEffect(() => {
+    if (areaNotifications.length > 0) {
+      setSubtleAreaAlert(areaNotifications[0]);
+      const timer = setTimeout(() => {
+        setSubtleAreaAlert(null);
+      }, 5000);
+      return () => clearTimeout(timer);
+    } else {
+      setSubtleAreaAlert(null);
+    }
+  }, [activeUser?.id, areaNotifications.length]);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -74,40 +298,104 @@ export default function App() {
     }, 4000);
   };
 
-  // Initial load
+  // Mapa de días de vigencia por ARS
+  const arsConfigMap = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const c of arsConfigs) {
+      map[c.ars_name.toUpperCase()] = c.dias_vigencia;
+    }
+    return map;
+  }, [arsConfigs]);
+
+  // Sincronización con la Base de Datos SQLite interna (Fuente de verdad persistente)
+  const loadBackendData = async () => {
+    try {
+      const [recData, cfgData, usrData] = await Promise.all([
+        apiFetchRecords({ limit: 'all', type: 'ALL' }),
+        apiFetchArsConfig(),
+        apiFetchUsers()
+      ]);
+
+      if (recData && recData.success && Array.isArray(recData.records)) {
+        setRecords(recData.records);
+        saveStoredRecords(recData.records);
+      }
+
+      if (cfgData && cfgData.length > 0) {
+        setArsConfigs(cfgData);
+      }
+
+      if (usrData && usrData.length > 0) {
+        setUsers(usrData);
+        saveStoredUsers(usrData);
+      }
+    } catch (e) {
+      console.warn('Error sincronizando con SQLite:', e);
+    }
+  };
+
   useEffect(() => {
-    const loadedRecords = getStoredRecords();
-    const loadedBatches = getStoredBatches();
-    const loadedUsers = getStoredUsers();
-    const loadedActiveUser = getActiveUser();
+    loadBackendData();
+  }, [activeUser?.id]);
 
-    setRecords(loadedRecords);
-    setBatches(loadedBatches);
-    setUsers(loadedUsers);
-    setActiveUserState(loadedActiveUser);
-  }, []);
-
-  // Save changes to records
-  const updateRecords = (newRecords: MedicalRecordItem[]) => {
+  // Guardar y sincronizar estado local + SQLite
+  const updateRecordsState = (newRecords: MedicalRecordItem[]) => {
     setRecords(newRecords);
     saveStoredRecords(newRecords);
   };
 
-  // Save changes to batches
+  const persistSingleRecord = async (record: MedicalRecordItem, isNew = false) => {
+    try {
+      if (isNew) {
+        await apiCreateRecord(record);
+      } else {
+        await apiUpdateRecord(record.id, record);
+      }
+    } catch (e) {
+      console.error('Error guardando registro en SQLite:', e);
+    }
+  };
+
   const updateBatches = (newBatches: DeliveryBatch[]) => {
     setBatches(newBatches);
     saveStoredBatches(newBatches);
   };
 
-  // Change active user
+  // Guardar configuración de vigencia por ARS en SQLite
+  const handleSaveArsConfigs = async (newConfigs: ArsExpirationConfig[]) => {
+    try {
+      const saved = await apiSaveArsConfig(newConfigs, activeUser?.name || 'Admin');
+      setArsConfigs(saved);
+      showToast('✓ Vigencia de meses/días por ARS actualizada en la base de datos.');
+    } catch (e) {
+      setArsConfigs(newConfigs);
+      showToast('Vigencia de ARS actualizada.');
+    }
+  };
+
+  // Login handler
+  const handleLoginSuccess = (user: User) => {
+    setActiveUserState(user);
+    setCurrentSession(user);
+    showToast(`Bienvenido al sistema: ${user.name} (${user.roleName})`);
+  };
+
+  // Logout handler
+  const handleLogout = () => {
+    logoutUser();
+    setActiveUserState(null);
+    showToast('Sesión cerrada correctamente.');
+  };
+
+  // Change active user from dropdown
   const handleSelectUser = (user: User) => {
     setActiveUserState(user);
-    persistActiveUser(user.id);
+    setCurrentSession(user);
     showToast(`Sesión cambiada a: ${user.name} (${user.roleName})`);
   };
 
-  // Add new user
-  const handleAddUser = (newUserData: Omit<User, 'id'>) => {
+  // Add new user from Root (Persistido en SQLite)
+  const handleAddUser = async (newUserData: Omit<User, 'id'>) => {
     const newUser: User = {
       ...newUserData,
       id: `usr_${Date.now()}`
@@ -115,22 +403,42 @@ export default function App() {
     const updated = [...users, newUser];
     setUsers(updated);
     saveStoredUsers(updated);
-    showToast(`Usuario ${newUser.name} registrado con éxito.`);
+    try {
+      await apiCreateUser(newUser);
+    } catch (e) {
+      console.error(e);
+    }
+    showToast(`✓ Usuario ${newUser.name} registrado en la base de datos.`);
   };
 
-  // Reset demo data
-  const handleResetData = () => {
-    resetAllDataToDefault();
-    const loadedRecords = getStoredRecords();
-    const loadedBatches = getStoredBatches();
-    const loadedUsers = getStoredUsers();
-    const loadedActiveUser = getActiveUser();
-    setRecords(loadedRecords);
-    setBatches(loadedBatches);
-    setUsers(loadedUsers);
-    setActiveUserState(loadedActiveUser);
-    setSelectedBatchFilter('ALL');
-    showToast('Datos reiniciados con lotes y relaciones originales.');
+  // Save edited user (Persistido en SQLite)
+  const handleSaveUser = async (updatedUser: User) => {
+    const updated = users.map(u => u.id === updatedUser.id ? updatedUser : u);
+    setUsers(updated);
+    saveStoredUsers(updated);
+    if (activeUser?.id === updatedUser.id) {
+      setActiveUserState(updatedUser);
+      setCurrentSession(updatedUser);
+    }
+    try {
+      await apiUpdateUser(updatedUser);
+    } catch (e) {
+      console.error(e);
+    }
+    showToast(`✓ Usuario ${updatedUser.name} actualizado en la base de datos.`);
+  };
+
+  // Reset demo data en SQLite y local
+  const handleResetData = async () => {
+    try {
+      const cleanRecords = await apiResetCleanRecords();
+      updateRecordsState(cleanRecords);
+      showToast('✓ Base de datos limpiada y restaurada con registros hospitalarios reales.');
+    } catch {
+      resetAllDataToDefault();
+      await loadBackendData();
+      showToast('Datos restaurados.');
+    }
   };
 
   // Open create record modal
@@ -146,21 +454,27 @@ export default function App() {
     setRecordModalOpen(true);
   };
 
-  // Delete record
-  const handleDeleteRecord = (id: string) => {
-    if (window.confirm('¿Está seguro de eliminar este registro del sistema? Esta acción no se puede deshacer.')) {
+  // Delete record (Persistido en SQLite)
+  const handleDeleteRecord = async (id: string) => {
+    if (window.confirm('¿Está seguro de eliminar este registro de la base de datos?')) {
       const updated = records.filter(r => r.id !== id);
-      updateRecords(updated);
-      showToast('Registro eliminado exitosamente.');
+      updateRecordsState(updated);
+      try {
+        await apiDeleteRecord(id);
+      } catch (e) {
+        console.error(e);
+      }
+      showToast('Registro eliminado de la base de datos.');
     }
   };
 
-  // Create or Update Record
-  const handleSaveRecord = (recordData: Partial<MedicalRecordItem>) => {
+  // Create or Update Record (Persistido en SQLite)
+  const handleSaveRecord = async (recordData: Partial<MedicalRecordItem>) => {
     const timestamp = new Date().toLocaleString('es-DO');
+    const operatorLabel = activeUser ? `${activeUser.name} (${activeUser.roleName})` : 'Sistema';
 
     if (recordData.id) {
-      // Update existing
+      let targetUpdated: MedicalRecordItem | null = null;
       const updated = records.map(r => {
         if (r.id === recordData.id) {
           const wasStageChanged = recordData.currentStage && recordData.currentStage !== r.currentStage;
@@ -172,35 +486,54 @@ export default function App() {
                   fromStage: r.currentStage,
                   toStage: recordData.currentStage!,
                   changedAt: timestamp,
-                  changedBy: activeUser?.name || 'Sistema'
+                  changedBy: operatorLabel
                 }
               ]
             : r.stageHistory || [];
 
-          return {
+          const cob = recordData.cobertura !== undefined ? Number(recordData.cobertura) : r.cobertura;
+          const glo = recordData.montoGlosado !== undefined ? Number(recordData.montoGlosado) : r.montoGlosado;
+
+          targetUpdated = {
             ...r,
             ...recordData,
+            cobertura: cob,
+            montoGlosado: glo,
+            aPagar: Math.max(0, cob - glo),
             stageHistory: newStageHistory,
             updatedAt: timestamp,
-            updatedBy: activeUser?.name || 'Sistema'
+            updatedBy: operatorLabel
           } as MedicalRecordItem;
+          return targetUpdated;
         }
         return r;
       });
 
-      updateRecords(updated);
-      showToast(`Registro de ${recordData.nombrePaciente} actualizado correctamente.`);
+      updateRecordsState(updated);
+      if (targetUpdated) {
+        await persistSingleRecord(targetUpdated, false);
+      }
+      showToast(`✓ Registro de ${recordData.nombrePaciente} guardado en base de datos.`);
     } else {
-      // Create new
-      const nextNumero = records.filter(r => r.type === recordData.type).length + 1;
-      const initialStage = recordData.currentStage || (recordData.type === 'EXPEDIENTE' ? 'RECEPCION' : 'RECEPCION_EMERGENCIA');
+      const nextNumero = records.filter(r => r.type === (recordData.type || currentType)).length + 1;
+      const initialStage =
+        recordData.currentStage ||
+        (selectedStage !== 'ALL'
+          ? selectedStage
+          : (recordData.type || currentType) === 'EXPEDIENTE'
+          ? 'RECEPCION'
+          : 'RECEPCION_EMERGENCIA');
+
+      const todayIso = new Date().toISOString().split('T')[0];
+      const cob = Number(recordData.cobertura || 0);
+      const glo = Number(recordData.montoGlosado || 0);
 
       const initialNote: RecordNote = {
         id: `note_${Date.now()}`,
         date: timestamp,
-        author: activeUser?.name || 'Recepción',
-        authorRole: activeUser?.role || 'RECEPCION',
-        text: recordData.nota || 'Apertura de caso en recepción',
+        author: operatorLabel,
+        authorRole: activeUser?.role || 'FACTURACION',
+        text: recordData.nota || `Emitido en etapa ${initialStage} por ${operatorLabel}`,
         stageAtNote: initialStage
       };
 
@@ -209,37 +542,366 @@ export default function App() {
         fromStage: 'INICIO',
         toStage: initialStage,
         changedAt: timestamp,
-        changedBy: activeUser?.name || 'Recepción'
+        changedBy: operatorLabel
       };
 
       const newRecord: MedicalRecordItem = {
         id: `rec_${Date.now()}`,
         numero: nextNumero,
         type: recordData.type || currentType,
-        nombrePaciente: recordData.nombrePaciente || 'PACIENTE SIN NOMBRE',
+        nombrePaciente: (recordData.nombrePaciente || 'PACIENTE SIN NOMBRE').toUpperCase(),
         nap: recordData.nap || 'SIN-NAP',
-        ars: recordData.ars || 'ARS SENASA',
-        fechaCierre: recordData.fechaCierre || new Date().toISOString().split('T')[0],
-        fechaRecepcion: new Date().toISOString().split('T')[0],
-        fechaEntrega: recordData.fechaEntrega || '2026-10-31',
-        cobertura: recordData.cobertura || 0,
-        montoGlosado: recordData.montoGlosado || 0,
-        aPagar: recordData.aPagar || (recordData.cobertura || 0),
-        nota: recordData.nota || 'Ingresado al sistema',
+        ars: recordData.ars || 'SENASA',
+        fechaCierre: recordData.fechaCierre || todayIso,
+        fechaRecepcion: todayIso,
+        fechaEntrega: recordData.fechaEntrega || todayIso,
+        cobertura: cob,
+        montoGlosado: glo,
+        aPagar: Math.max(0, cob - glo),
+        nota: recordData.nota || '',
         currentStage: initialStage,
         loteId: recordData.loteId,
-        loteCodigo: recordData.loteCodigo,
+        loteCodigo: recordData.loteCodigo || `REL-${recordData.fechaEntrega || todayIso}`,
+        auditorAsignadoNombre: recordData.auditorAsignadoNombre,
+        tienePendienteBiopsia: initialStage === 'BIOPSIAS' || Boolean(recordData.tienePendienteBiopsia),
+        medicoTratante: recordData.medicoTratante,
+        vecesEnviadaBiopsia: recordData.vecesEnviadaBiopsia || 1,
+        descripcionBiopsia: recordData.descripcionBiopsia,
         notesHistory: [initialNote],
         stageHistory: [initialStageHistory],
         createdAt: timestamp,
-        createdBy: activeUser?.name || 'Sistema',
+        createdBy: operatorLabel,
         updatedAt: timestamp,
-        updatedBy: activeUser?.name || 'Sistema'
+        updatedBy: operatorLabel,
+        conciliadoAdmin: false
       };
 
-      updateRecords([newRecord, ...records]);
-      showToast(`Nuevo registro creado: ${newRecord.nombrePaciente} (#${newRecord.numero}) en lote ${newRecord.loteCodigo || 'General'}`);
+      updateRecordsState([newRecord, ...records]);
+      await persistSingleRecord(newRecord, true);
+      showToast(`✓ Nuevo registro guardado en base de datos: ${newRecord.nombrePaciente} (Generado por ${operatorLabel})`);
     }
+  };
+
+  // Workflow Action 1: Tachar y Aceptar llegada (Recepción Administrativa -> Auditor)
+  const handleConciliateRecord = async (record: MedicalRecordItem, auditorName?: string) => {
+    const timestamp = new Date().toLocaleString('es-DO');
+    const operatorLabel = activeUser ? `${activeUser.name} (${activeUser.roleName})` : 'Administrativo';
+    const targetStage: AnyStageId = record.type === 'EXPEDIENTE' ? 'AUDITORIA' : 'ENTREGA_ARS_EMERGENCIA';
+    const assignedAuditor = auditorName || record.auditorAsignadoNombre || 'Dr. Marcos Tejada';
+
+    const noteItem: RecordNote = {
+      id: `n_${Date.now()}`,
+      date: timestamp,
+      author: operatorLabel,
+      authorRole: activeUser?.role || 'ADMINISTRATIVO',
+      text: `Llegada física aceptada y cotejada por ${operatorLabel}. Entregado a: ${assignedAuditor}.`,
+      stageAtNote: targetStage
+    };
+
+    const historyItem: StageHistoryItem = {
+      id: `sh_${Date.now()}`,
+      fromStage: record.currentStage,
+      toStage: targetStage,
+      changedAt: timestamp,
+      changedBy: operatorLabel,
+      notes: `Cotejado y entregado a ${assignedAuditor}`
+    };
+
+    let targetUpdated: MedicalRecordItem | null = null;
+    const updated = records.map(r => {
+      if (r.id === record.id) {
+        targetUpdated = {
+          ...r,
+          conciliadoAdmin: true,
+          conciliadoPor: operatorLabel,
+          conciliadoEn: timestamp,
+          auditorAsignadoNombre: record.type === 'EXPEDIENTE' ? assignedAuditor : undefined,
+          currentStage: targetStage,
+          notesHistory: [...(r.notesHistory || []), noteItem],
+          stageHistory: [...(r.stageHistory || []), historyItem],
+          updatedAt: timestamp,
+          updatedBy: operatorLabel
+        };
+        return targetUpdated;
+      }
+      return r;
+    });
+
+    updateRecordsState(updated);
+    if (targetUpdated) {
+      await persistSingleRecord(targetUpdated, false);
+    }
+    showToast(`✓ Llegada aceptada por ${activeUser?.name} y entregada a ${assignedAuditor}.`);
+  };
+
+  // Bulk Conciliate: Tachar y Aceptar en lote (Persistido en SQLite)
+  const handleBulkConciliate = async (recordIds: string[], auditorName?: string) => {
+    const timestamp = new Date().toLocaleString('es-DO');
+    const operatorLabel = activeUser ? `${activeUser.name} (${activeUser.roleName})` : 'Administrativo';
+    const assignedAuditor = auditorName || 'Dr. Marcos Tejada';
+
+    const updated = records.map(r => {
+      if (recordIds.includes(r.id)) {
+        const targetStage: AnyStageId = r.type === 'EXPEDIENTE' ? 'AUDITORIA' : 'ENTREGA_ARS_EMERGENCIA';
+        return {
+          ...r,
+          conciliadoAdmin: true,
+          conciliadoPor: operatorLabel,
+          conciliadoEn: timestamp,
+          auditorAsignadoNombre: r.type === 'EXPEDIENTE' ? assignedAuditor : r.auditorAsignadoNombre,
+          currentStage: targetStage,
+          updatedAt: timestamp,
+          updatedBy: operatorLabel
+        };
+      }
+      return r;
+    });
+
+    updateRecordsState(updated);
+    try {
+      await apiBulkConciliate(recordIds, operatorLabel, assignedAuditor);
+    } catch (e) {
+      console.error(e);
+    }
+    showToast(`✓ ${recordIds.length} registros cotejados por ${activeUser?.name} y entregados a ${assignedAuditor}.`);
+  };
+
+  // Open Audit Process Modal
+  const handleOpenAuditModal = (record: MedicalRecordItem) => {
+    setSelectedRecordForAudit(record);
+    setAuditModalOpen(true);
+  };
+
+  // Workflow Action 2: Guardar Auditoría Médica y Procesar (Persistido en SQLite)
+  const handleSaveAudit = async (
+    recordId: string, 
+    data: { 
+      montoGlosado: number; 
+      reporteAuditoria: string; 
+      auditorConfirmado: boolean;
+      auditoriaProcesada: boolean;
+      advanceToNextStage?: boolean;
+    }
+  ) => {
+    const timestamp = new Date().toLocaleString('es-DO');
+    const operatorLabel = activeUser ? `${activeUser.name}` : 'Auditor Médico';
+    const targetStage: AnyStageId = data.advanceToNextStage ? 'RECEPCION_AUDITORES' : 'AUDITORIA';
+
+    let targetUpdated: MedicalRecordItem | null = null;
+    const updated = records.map(r => {
+      if (r.id === recordId) {
+        const aPagar = Math.max(0, (r.cobertura || 0) - data.montoGlosado);
+        const notes = [...(r.notesHistory || [])];
+        const histories = [...(r.stageHistory || [])];
+
+        if (data.reporteAuditoria) {
+          notes.push({
+            id: `n_${Date.now()}`,
+            date: timestamp,
+            author: operatorLabel,
+            authorRole: activeUser?.role || 'AUDITOR_MEDICO',
+            text: `Reporte de Auditoría (${operatorLabel}): ${data.reporteAuditoria} | Glosa: ${formatCurrency(data.montoGlosado)}`,
+            stageAtNote: targetStage
+          });
+        }
+
+        if (data.advanceToNextStage && r.currentStage !== targetStage) {
+          histories.push({
+            id: `sh_${Date.now()}`,
+            fromStage: r.currentStage,
+            toStage: targetStage,
+            changedAt: timestamp,
+            changedBy: operatorLabel,
+            notes: 'Auditoría médica completada y entregada a Recepción de Auditores.'
+          });
+        }
+
+        targetUpdated = {
+          ...r,
+          montoGlosado: data.montoGlosado,
+          aPagar,
+          nota: data.reporteAuditoria || r.nota,
+          reporteAuditoria: data.reporteAuditoria,
+          auditorConfirmado: data.auditorConfirmado,
+          auditorConfirmadoEn: data.auditorConfirmado ? (r.auditorConfirmadoEn || timestamp) : undefined,
+          auditorAsignadoNombre: r.auditorAsignadoNombre || operatorLabel,
+          auditoriaProcesada: data.auditoriaProcesada,
+          auditoriaProcesadaEn: data.auditoriaProcesada ? timestamp : undefined,
+          currentStage: targetStage,
+          notesHistory: notes,
+          stageHistory: histories,
+          updatedAt: timestamp,
+          updatedBy: operatorLabel
+        };
+        return targetUpdated;
+      }
+      return r;
+    });
+
+    updateRecordsState(updated);
+    if (targetUpdated) {
+      await persistSingleRecord(targetUpdated, false);
+    }
+    showToast(
+      data.advanceToNextStage
+        ? `✓ Expediente auditado y marcado como Entregado por ${operatorLabel}.`
+        : '✓ Avance de auditoría guardado en base de datos.'
+    );
+  };
+
+  // Workflow Action 3: Derivar a Entrega ARS (Caso Completo - Persistido en SQLite)
+  const handleRouteToArs = async (record: MedicalRecordItem) => {
+    const timestamp = new Date().toLocaleString('es-DO');
+    const operatorLabel = activeUser ? `${activeUser.name} (${activeUser.roleName})` : 'Administrativo';
+    const targetStage: AnyStageId = record.type === 'EXPEDIENTE' ? 'ENTREGA_ARS' : 'ENTREGA_ARS_EMERGENCIA';
+
+    let targetUpdated: MedicalRecordItem | null = null;
+    const updated = records.map(r => {
+      if (r.id === record.id) {
+        targetUpdated = {
+          ...r,
+          currentStage: targetStage,
+          recepcionAuditoresConfirmada: true,
+          recepcionAuditoresPor: operatorLabel,
+          recepcionAuditoresEn: timestamp,
+          entregadoArsPor: operatorLabel,
+          entregadoArsEn: timestamp,
+          recibidoArsPor: `Valija Oficial ARS ${r.ars}`,
+          updatedAt: timestamp,
+          updatedBy: operatorLabel
+        };
+        return targetUpdated;
+      }
+      return r;
+    });
+
+    updateRecordsState(updated);
+    if (targetUpdated) {
+      await persistSingleRecord(targetUpdated, false);
+    }
+    showToast(`✓ Expediente de ${record.nombrePaciente} pasado a Entrega a ARS (${record.ars}).`);
+  };
+
+  // Workflow Action 4: Derivar a Biopsias u otros pendientes (Persistido en SQLite)
+  const handleRouteToBiopsias = async (record: MedicalRecordItem) => {
+    const timestamp = new Date().toLocaleString('es-DO');
+    const operatorLabel = activeUser ? `${activeUser.name} (${activeUser.roleName})` : 'Administrativo';
+    const targetStage: AnyStageId = 'BIOPSIAS';
+
+    let targetUpdated: MedicalRecordItem | null = null;
+    const updated = records.map(r => {
+      if (r.id === record.id) {
+        targetUpdated = {
+          ...r,
+          currentStage: targetStage,
+          tienePendienteBiopsia: true,
+          vecesEnviadaBiopsia: r.vecesEnviadaBiopsia || 1,
+          medicoTratante: r.medicoTratante || r.auditorAsignadoNombre || 'DR. TRATANTE',
+          descripcionBiopsia: r.descripcionBiopsia || r.nota || 'REPORTE HISTOPATOLOGICO PENDIENTE',
+          recepcionAuditoresConfirmada: true,
+          recepcionAuditoresPor: operatorLabel,
+          recepcionAuditoresEn: timestamp,
+          updatedAt: timestamp,
+          updatedBy: operatorLabel
+        };
+        return targetUpdated;
+      }
+      return r;
+    });
+
+    updateRecordsState(updated);
+    if (targetUpdated) {
+      await persistSingleRecord(targetUpdated, false);
+    }
+    showToast(`✓ Expediente de ${record.nombrePaciente} enviado a Solicitud de Biopsias (Enviadas: 1).`);
+  };
+
+  // Workflow Action 4B: Incrementar contador de envíos en Biopsia (1 -> 2 -> 3...)
+  const handleIncrementBiopsiaSend = async (record: MedicalRecordItem) => {
+    const timestamp = new Date().toLocaleString('es-DO');
+    const operatorLabel = activeUser ? `${activeUser.name} (${activeUser.roleName})` : 'Administrativo';
+    const nextCount = (record.vecesEnviadaBiopsia || 1) + 1;
+
+    let targetUpdated: MedicalRecordItem | null = null;
+    const updated = records.map(r => {
+      if (r.id === record.id) {
+        targetUpdated = {
+          ...r,
+          vecesEnviadaBiopsia: nextCount,
+          updatedAt: timestamp,
+          updatedBy: operatorLabel
+        };
+        return targetUpdated;
+      }
+      return r;
+    });
+
+    updateRecordsState(updated);
+    if (targetUpdated) {
+      await persistSingleRecord(targetUpdated, false);
+    }
+    showToast(`✓ Biopsia de ${record.nombrePaciente} marcada con ${nextCount} envíos (Pasa a sección Biopsias Pendientes).`);
+  };
+
+  // Workflow Action 4C: Completar Biopsia, Archivar en Completadas y Pasar a Entrega ARS
+  const handleCompleteBiopsia = async (record: MedicalRecordItem) => {
+    const timestamp = new Date().toLocaleString('es-DO');
+    const operatorLabel = activeUser ? `${activeUser.name} (${activeUser.roleName})` : 'Administrativo';
+
+    let targetUpdated: MedicalRecordItem | null = null;
+    const updated = records.map(r => {
+      if (r.id === record.id) {
+        targetUpdated = {
+          ...r,
+          tienePendienteBiopsia: false,
+          biopsiaCompletada: true,
+          biopsiaCompletadaEn: timestamp,
+          biopsiaCompletadaPor: operatorLabel,
+          currentStage: 'ENTREGA_ARS',
+          entregadoArsPor: operatorLabel,
+          entregadoArsEn: timestamp,
+          recibidoArsPor: `ARS ${r.ars}`,
+          updatedAt: timestamp,
+          updatedBy: operatorLabel
+        };
+        return targetUpdated;
+      }
+      return r;
+    });
+
+    updateRecordsState(updated);
+    if (targetUpdated) {
+      await persistSingleRecord(targetUpdated, false);
+    }
+    showToast(`✓ Biopsia de ${record.nombrePaciente} archivada en Completadas y expediente enviado a Entrega ARS (${record.ars}).`);
+  };
+
+  // Workflow Action 5: Confirmar Recepción en Facturación (Radicación Final)
+  const handleConfirmBillingDelivery = async (record: MedicalRecordItem) => {
+    const timestamp = new Date().toLocaleString('es-DO');
+    const operatorLabel = activeUser ? `${activeUser.name} (${activeUser.roleName})` : 'Facturación';
+
+    let targetUpdated: MedicalRecordItem | null = null;
+    const updated = records.map(r => {
+      if (r.id === record.id) {
+        targetUpdated = {
+          ...r,
+          facturacionConfirmada: true,
+          facturacionConfirmadaPor: operatorLabel,
+          facturacionConfirmadaEn: timestamp,
+          updatedAt: timestamp,
+          updatedBy: operatorLabel
+        };
+        return targetUpdated;
+      }
+      return r;
+    });
+
+    updateRecordsState(updated);
+    if (targetUpdated) {
+      await persistSingleRecord(targetUpdated, false);
+    }
+    showToast(`✓ Recepción final confirmada en Facturación por ${operatorLabel}.`);
   };
 
   // Create New Delivery Batch
@@ -253,34 +915,12 @@ export default function App() {
     showToast(`Lote ${newBatch.codigo} creado exitosamente.`);
   };
 
-  // Bulk assign records to batch
-  const handleBulkAssignBatch = (recordIds: string[], batchId: string) => {
-    const targetBatch = batches.find(b => b.id === batchId);
-    if (!targetBatch) return;
-
-    const updated = records.map(r => {
-      if (recordIds.includes(r.id)) {
-        return {
-          ...r,
-          loteId: targetBatch.id,
-          loteCodigo: targetBatch.codigo
-        };
-      }
-      return r;
-    });
-
-    updateRecords(updated);
-    showToast(`${recordIds.length} expedientes asignados al lote: ${targetBatch.codigo}`);
-  };
-
-  // Jump from Batches View to Table View with filter
+  // Jump from Batches View to Table View
   const handleSelectBatchToFilter = (batchId: string, batchType: RecordType) => {
     setCurrentType(batchType);
     setSelectedBatchFilter(batchId);
     setSelectedStage('ALL');
     setActiveView('RECORDS');
-    const batch = batches.find(b => b.id === batchId);
-    showToast(`Filtrando tabla por lote: ${batch?.codigo || batchId}`);
   };
 
   // Quick add from inline row
@@ -294,99 +934,126 @@ export default function App() {
     setNotesModalOpen(true);
   };
 
-  // Add Note to Record
-  const handleAddNote = (recordId: string, noteText: string) => {
+  // Add Note to Record (Persistido en SQLite)
+  const handleAddNote = async (recordId: string, noteText: string) => {
     const timestamp = new Date().toLocaleString('es-DO');
+    const operatorLabel = activeUser ? `${activeUser.name} (${activeUser.roleName})` : 'Usuario';
     const newNote: RecordNote = {
       id: `n_${Date.now()}`,
       date: timestamp,
-      author: activeUser?.name || 'Usuario',
-      authorRole: activeUser?.role || 'AUDITOR',
+      author: operatorLabel,
+      authorRole: activeUser?.role || 'ADMINISTRATIVO',
       text: noteText,
       stageAtNote: selectedRecordForNotes?.currentStage || 'RECEPCION'
     };
 
+    let targetUpdated: MedicalRecordItem | null = null;
     const updated = records.map(r => {
       if (r.id === recordId) {
-        return {
+        targetUpdated = {
           ...r,
           nota: noteText,
           notesHistory: [...(r.notesHistory || []), newNote],
           updatedAt: timestamp,
-          updatedBy: activeUser?.name || 'Sistema'
+          updatedBy: operatorLabel
         };
+        return targetUpdated;
       }
       return r;
     });
 
-    updateRecords(updated);
-
-    const refreshed = updated.find(r => r.id === recordId);
-    if (refreshed) {
-      setSelectedRecordForNotes(refreshed);
+    updateRecordsState(updated);
+    if (targetUpdated) {
+      setSelectedRecordForNotes(targetUpdated);
+      await persistSingleRecord(targetUpdated, false);
     }
-
-    showToast('Observación añadida a la línea de tiempo.');
+    showToast('✓ Observación guardada en la base de datos.');
   };
 
-  // Advance single record stage
-  const handleAdvanceStage = (record: MedicalRecordItem, targetStageId: AnyStageId) => {
+  // Advance single record stage (Persistido en SQLite)
+  const handleAdvanceStage = async (record: MedicalRecordItem) => {
+    const nextSt = getNextStage(record.type, record.currentStage);
+    const targetStageId: AnyStageId = nextSt
+      ? nextSt.id
+      : record.type === 'EXPEDIENTE'
+      ? 'FACTURACION'
+      : 'FACTURACION_EMERGENCIA';
+
     const targetStageConfig = getStageConfig(targetStageId);
     const timestamp = new Date().toLocaleString('es-DO');
+    const operatorLabel = activeUser ? `${activeUser.name} (${activeUser.roleName})` : 'Sistema';
 
-    const newHistoryItem: StageHistoryItem = {
-      id: `sh_${Date.now()}`,
-      fromStage: record.currentStage,
-      toStage: targetStageId,
-      changedAt: timestamp,
-      changedBy: activeUser?.name || 'Sistema'
-    };
-
+    let targetUpdated: MedicalRecordItem | null = null;
     const updated = records.map(r => {
       if (r.id === record.id) {
-        return {
+        targetUpdated = {
           ...r,
           currentStage: targetStageId,
-          stageHistory: [...(r.stageHistory || []), newHistoryItem],
+          entregadoFacturacionPor:
+            targetStageId === 'FACTURACION' || targetStageId === 'FACTURACION_EMERGENCIA'
+              ? operatorLabel
+              : r.entregadoFacturacionPor,
+          entregadoFacturacionEn:
+            targetStageId === 'FACTURACION' || targetStageId === 'FACTURACION_EMERGENCIA'
+              ? timestamp
+              : r.entregadoFacturacionEn,
+          stageHistory: [
+            ...(r.stageHistory || []),
+            {
+              id: `sh_${Date.now()}`,
+              fromStage: r.currentStage,
+              toStage: targetStageId,
+              changedAt: timestamp,
+              changedBy: operatorLabel
+            }
+          ],
           updatedAt: timestamp,
-          updatedBy: activeUser?.name || 'Sistema'
+          updatedBy: operatorLabel
         };
+        return targetUpdated;
       }
       return r;
     });
 
-    updateRecords(updated);
-    showToast(`Expediente movido a: ${targetStageConfig?.label || targetStageId}`);
+    updateRecordsState(updated);
+    if (targetUpdated) {
+      await persistSingleRecord(targetUpdated, false);
+    }
+    showToast(`✓ Expediente transferido por ${operatorLabel} a: ${targetStageConfig?.label || targetStageId}`);
   };
 
-  // Bulk advance records
-  const handleBulkAdvance = (selectedRecords: MedicalRecordItem[], targetStageId: AnyStageId) => {
+  // Bulk advance records (Persistido en SQLite)
+  const handleBulkAdvance = async (selectedIds: string[], targetStageId: AnyStageId) => {
     const targetStageConfig = getStageConfig(targetStageId);
     const timestamp = new Date().toLocaleString('es-DO');
-    const selectedIds = selectedRecords.map(r => r.id);
+    const operatorLabel = activeUser ? `${activeUser.name} (${activeUser.roleName})` : 'Sistema';
 
+    const toPersist: MedicalRecordItem[] = [];
     const updated = records.map(r => {
       if (selectedIds.includes(r.id)) {
-        const newHistoryItem: StageHistoryItem = {
-          id: `sh_${Date.now()}_${r.id}`,
-          fromStage: r.currentStage,
-          toStage: targetStageId,
-          changedAt: timestamp,
-          changedBy: activeUser?.name || 'Sistema'
-        };
-        return {
+        const mod: MedicalRecordItem = {
           ...r,
           currentStage: targetStageId,
-          stageHistory: [...(r.stageHistory || []), newHistoryItem],
+          entregadoArsPor:
+            targetStageId === 'ENTREGA_ARS' || targetStageId === 'ENTREGA_ARS_EMERGENCIA'
+              ? operatorLabel
+              : r.entregadoArsPor,
+          entregadoFacturacionPor:
+            targetStageId === 'FACTURACION' || targetStageId === 'FACTURACION_EMERGENCIA'
+              ? operatorLabel
+              : r.entregadoFacturacionPor,
           updatedAt: timestamp,
-          updatedBy: activeUser?.name || 'Sistema'
+          updatedBy: operatorLabel
         };
+        toPersist.push(mod);
+        return mod;
       }
       return r;
     });
 
-    updateRecords(updated);
-    showToast(`${selectedRecords.length} expedientes transferidos a: ${targetStageConfig?.label}`);
+    updateRecordsState(updated);
+    await Promise.all(toPersist.map(item => persistSingleRecord(item, false)));
+    showToast(`✓ ${selectedIds.length} registros transferidos por ${operatorLabel} a: ${targetStageConfig?.label}`);
   };
 
   // Open Official Report Modal
@@ -394,45 +1061,104 @@ export default function App() {
     filteredRecords: MedicalRecordItem[],
     title: string,
     ars: string,
-    deliveryDate: string
+    deliveryDate: string,
+    extra?: {
+      stage?: AnyStageId | 'ALL';
+      auditorName?: string;
+      deliveredBy?: string;
+      receivedBy?: string;
+    }
   ) => {
     setReportData({
       records: filteredRecords,
       title,
       ars,
-      deliveryDate
+      deliveryDate,
+      stage: extra?.stage || selectedStage,
+      auditorName: extra?.auditorName,
+      deliveredBy: extra?.deliveredBy,
+      receivedBy: extra?.receivedBy
     });
     setOfficialReportModalOpen(true);
   };
 
-  if (!activeUser) return null;
+  // Si no hay usuario logueado, mostrar pantalla de inicio de sesión
+  if (!activeUser) {
+    return <LoginView onLoginSuccess={handleLoginSuccess} />;
+  }
 
   const totalExpedientes = records.filter(r => r.type === 'EXPEDIENTE').length;
   const totalEmergencias = records.filter(r => r.type === 'EMERGENCIA').length;
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
-      {/* Toast Alert */}
+      {/* Cortina Animada de Transición Modo Oscuro (Media Luna) / Modo Claro (Sol Guiñando) */}
+      <ThemeCurtainTransition phase={curtainPhase} targetTheme={targetTheme} />
+
+      {/* Toast Alert Sutil */}
       {toastMessage && (
-        <div className="fixed bottom-4 right-4 z-50 bg-slate-900 text-white px-4 py-2.5 rounded-xl shadow-xl text-xs font-semibold flex items-center gap-2 border border-slate-700 animate-in slide-in-from-bottom-2 duration-200">
+        <div className="fixed bottom-4 right-4 z-50 bg-slate-900/95 backdrop-blur-xs text-white px-3.5 py-2 rounded-xl shadow-lg text-xs font-semibold flex items-center gap-2 border border-slate-700 animate-in slide-in-from-bottom-2 duration-200 pointer-events-none">
           <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
           <span>{toastMessage}</span>
         </div>
       )}
 
-      {/* Institutional Header with Contacts & User Switcher */}
+      {/* Aviso Sutil No Invasivo para el Área Receptora (Esquina Inferior Izquierda) */}
+      {subtleAreaAlert && (
+        <div className="fixed bottom-4 left-4 z-40 max-w-xs bg-slate-900/90 backdrop-blur-md text-white px-3.5 py-2.5 rounded-xl shadow-lg border border-slate-700/80 text-xs flex items-center justify-between gap-3 animate-in slide-in-from-bottom-2 duration-300">
+          <div
+            onClick={() => {
+              setCurrentType(subtleAreaAlert.targetType);
+              setSelectedStage(subtleAreaAlert.targetStage);
+              setActiveView('RECORDS');
+              setSubtleAreaAlert(null);
+            }}
+            className="cursor-pointer flex-1 min-w-0"
+          >
+            <div className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-sky-400 animate-ping shrink-0"></span>
+              <span className="font-extrabold text-sky-300 truncate">
+                {subtleAreaAlert.title} ({subtleAreaAlert.count})
+              </span>
+            </div>
+            <p className="text-[10px] text-slate-300 truncate mt-0.5">
+              De: {subtleAreaAlert.sender} &bull; Clic para ver
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setSubtleAreaAlert(null)}
+            className="text-slate-400 hover:text-white text-xs font-bold px-1 cursor-pointer"
+            title="Ocultar aviso"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
+      {/* Institutional Header */}
       <Header
         activeUser={activeUser}
         users={users}
         onSelectUser={handleSelectUser}
+        onLogout={handleLogout}
         onOpenNewRecord={handleOpenNewRecord}
         onResetData={handleResetData}
-        onOpenUsersManager={() => setUsersModalOpen(true)}
+        onOpenUsersManager={() => setUserManagementModalOpen(true)}
+        onOpenArsConfig={() => setArsConfigModalOpen(true)}
         totalExpedientes={totalExpedientes}
         totalEmergencias={totalEmergencias}
+        theme={theme}
+        onToggleTheme={handleToggleTheme}
+        areaNotifications={areaNotifications}
+        onSelectNotificationStage={(targetType, targetStage) => {
+          setCurrentType(targetType);
+          setSelectedStage(targetStage);
+          setActiveView('RECORDS');
+        }}
       />
 
-      {/* Main HUD Principal (Stage Pipeline, Modules & Lotes Switcher) */}
+      {/* Main HUD Principal */}
       <PipelineHUD
         currentType={currentType}
         onChangeType={setCurrentType}
@@ -442,6 +1168,7 @@ export default function App() {
         batches={batches}
         activeView={activeView}
         onChangeView={setActiveView}
+        activeUser={activeUser}
       />
 
       {/* Content View */}
@@ -455,15 +1182,25 @@ export default function App() {
             selectedBatchFilter={selectedBatchFilter}
             onChangeBatchFilter={setSelectedBatchFilter}
             activeUser={activeUser}
+            users={users}
+            arsConfigs={arsConfigs}
+            onOpenArsConfig={() => setArsConfigModalOpen(true)}
             onOpenNewRecord={handleOpenNewRecord}
             onEditRecord={handleEditRecord}
             onDeleteRecord={handleDeleteRecord}
             onOpenNotes={handleOpenNotes}
             onAdvanceStage={handleAdvanceStage}
             onBulkAdvance={handleBulkAdvance}
-            onBulkAssignBatch={handleBulkAssignBatch}
             onOpenOfficialReport={handleOpenOfficialReport}
             onQuickAdd={handleQuickAdd}
+            onOpenAuditModal={handleOpenAuditModal}
+            onConciliateRecord={handleConciliateRecord}
+            onBulkConciliate={handleBulkConciliate}
+            onRouteToBiopsias={handleRouteToBiopsias}
+            onRouteToArs={handleRouteToArs}
+            onConfirmBillingDelivery={handleConfirmBillingDelivery}
+            onIncrementBiopsiaSend={handleIncrementBiopsiaSend}
+            onCompleteBiopsia={handleCompleteBiopsia}
           />
         )}
 
@@ -481,6 +1218,14 @@ export default function App() {
         {activeView === 'ANALYTICS' && (
           <AnalyticsView records={records} />
         )}
+
+        {activeView === 'DATABASE' && (
+          <DatabasePerformanceView
+            totalRecords={records.length}
+            onRefreshRecords={loadBackendData}
+            showToast={showToast}
+          />
+        )}
       </main>
 
       {/* Modal: Create/Edit Record */}
@@ -492,10 +1237,11 @@ export default function App() {
         defaultType={currentType}
         defaultStage={selectedStage !== 'ALL' ? selectedStage : (currentType === 'EXPEDIENTE' ? 'RECEPCION' : 'RECEPCION_EMERGENCIA')}
         activeUser={activeUser}
+        users={users}
         onSave={handleSaveRecord}
       />
 
-      {/* Modal: Create New Batch / Delivery Cycle */}
+      {/* Modal: Create New Batch */}
       <CreateBatchModal
         isOpen={createBatchModalOpen}
         onClose={() => setCreateBatchModalOpen(false)}
@@ -522,16 +1268,42 @@ export default function App() {
         title={reportData.title}
         ars={reportData.ars}
         deliveryDate={reportData.deliveryDate}
+        stage={reportData.stage}
+        auditorName={reportData.auditorName}
+        deliveredBy={reportData.deliveredBy}
+        receivedBy={reportData.receivedBy}
+        arsConfigMap={arsConfigMap}
       />
 
-      {/* Modal: Users & Role Matrix */}
-      <UsersModal
-        isOpen={usersModalOpen}
-        onClose={() => setUsersModalOpen(false)}
+      {/* Modal: User & Permissions Management (Root Admin) */}
+      <UserManagementModal
+        isOpen={userManagementModalOpen}
+        onClose={() => setUserManagementModalOpen(false)}
         users={users}
         activeUser={activeUser}
-        onSelectUser={handleSelectUser}
+        onSaveUser={handleSaveUser}
         onAddUser={handleAddUser}
+      />
+
+      {/* Modal: Configuración de Vigencia de ARS (2-3 Meses por ARS) */}
+      <ArsConfigModal
+        isOpen={arsConfigModalOpen}
+        onClose={() => setArsConfigModalOpen(false)}
+        configs={arsConfigs}
+        activeUser={activeUser}
+        onSaveConfigs={handleSaveArsConfigs}
+      />
+
+      {/* Modal: Audit Process Modal (Auditor Médico) */}
+      <AuditProcessModal
+        isOpen={auditModalOpen}
+        onClose={() => {
+          setAuditModalOpen(false);
+          setSelectedRecordForAudit(null);
+        }}
+        record={selectedRecordForAudit}
+        activeUser={activeUser}
+        onSaveAudit={handleSaveAudit}
       />
     </div>
   );

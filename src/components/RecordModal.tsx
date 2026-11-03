@@ -4,11 +4,9 @@ import {
   Save, 
   FolderGit2, 
   Flame, 
-  AlertCircle, 
   Calculator,
-  ShieldCheck,
   Stethoscope,
-  Package
+  Microscope
 } from 'lucide-react';
 import { 
   MedicalRecordItem, 
@@ -20,7 +18,7 @@ import {
   EXPEDIENTE_STAGES,
   EMERGENCIA_STAGES
 } from '../types';
-import { formatCurrency, canAuditRecord, canCreateRecord } from '../utils/formatters';
+import { formatCurrency, canAuditRecord, normalizeArsName } from '../utils/formatters';
 
 interface RecordModalProps {
   isOpen: boolean;
@@ -30,6 +28,7 @@ interface RecordModalProps {
   defaultType: RecordType;
   defaultStage: AnyStageId;
   activeUser: User;
+  users?: User[];
   onSave: (recordData: Partial<MedicalRecordItem>) => void;
 }
 
@@ -37,27 +36,25 @@ export const RecordModal: React.FC<RecordModalProps> = ({
   isOpen,
   onClose,
   record,
-  batches,
   defaultType,
   defaultStage,
   activeUser,
+  users = [],
   onSave
 }) => {
   if (!isOpen) return null;
 
   const isEditing = Boolean(record);
+  const todayIso = new Date().toISOString().split('T')[0];
+
   const [type, setType] = useState<RecordType>(record?.type || defaultType);
   const [nombrePaciente, setNombrePaciente] = useState(record?.nombrePaciente || '');
   const [nap, setNap] = useState(record?.nap || '');
-  const [ars, setArs] = useState(record?.ars || 'ARS SENASA');
+  const [ars, setArs] = useState(normalizeArsName(record?.ars || 'SENASA'));
   const [customArs, setCustomArs] = useState('');
   const [isCustomArs, setIsCustomArs] = useState(false);
-  const [fechaCierre, setFechaCierre] = useState(
-    record?.fechaCierre || new Date().toISOString().split('T')[0]
-  );
-  const [fechaEntrega, setFechaEntrega] = useState(
-    record?.fechaEntrega || '2026-10-31'
-  );
+  const [fechaCierre, setFechaCierre] = useState(record?.fechaCierre || todayIso);
+  const [fechaEntrega, setFechaEntrega] = useState(record?.fechaEntrega || todayIso);
   const [cobertura, setCobertura] = useState<string>(
     record?.cobertura !== undefined ? String(record.cobertura) : ''
   );
@@ -68,20 +65,22 @@ export const RecordModal: React.FC<RecordModalProps> = ({
   const [currentStage, setCurrentStage] = useState<AnyStageId>(
     record?.currentStage || defaultStage
   );
-  const [loteId, setLoteId] = useState<string>(record?.loteId || '');
 
-  // Available stages based on type
+  // Campos de Auditoría y Biopsias
+  const [auditorAsignadoNombre, setAuditorAsignadoNombre] = useState(
+    record?.auditorAsignadoNombre || ''
+  );
+  const [medicoTratante, setMedicoTratante] = useState(record?.medicoTratante || '');
+  const [vecesEnviadaBiopsia, setVecesEnviadaBiopsia] = useState<number>(
+    record?.vecesEnviadaBiopsia || 1
+  );
+  const [descripcionBiopsia, setDescripcionBiopsia] = useState(
+    record?.descripcionBiopsia || ''
+  );
+
   const availableStages = type === 'EXPEDIENTE' ? EXPEDIENTE_STAGES : EMERGENCIA_STAGES;
-  const availableBatches = batches.filter(b => b.tipo === type);
+  const auditorUsers = users.filter(u => u.role === 'AUDITOR_MEDICO' || u.role === 'AUDITOR');
 
-  // Set default lote if none selected
-  useEffect(() => {
-    if (!loteId && availableBatches.length > 0) {
-      setLoteId(availableBatches[0].id);
-    }
-  }, [availableBatches, loteId]);
-
-  // Auto-calculated A PAGAR
   const numCobertura = parseFloat(cobertura) || 0;
   const numGlosado = parseFloat(montoGlosado) || 0;
   const numAPagar = Math.max(0, numCobertura - numGlosado);
@@ -94,12 +93,11 @@ export const RecordModal: React.FC<RecordModalProps> = ({
       return;
     }
     if (!nap.trim()) {
-      alert('Por favor ingrese el número NAP.');
+      alert('Por favor ingrese el número NAP / Autorización.');
       return;
     }
 
-    const finalArs = isCustomArs ? (customArs.trim() || 'ARS SENASA') : ars;
-    const selectedBatch = batches.find(b => b.id === loteId);
+    const finalArs = isCustomArs ? (customArs.trim().toUpperCase() || 'SENASA') : ars;
 
     onSave({
       ...(record ? { id: record.id } : {}),
@@ -112,20 +110,24 @@ export const RecordModal: React.FC<RecordModalProps> = ({
       cobertura: numCobertura,
       montoGlosado: numGlosado,
       aPagar: numAPagar,
-      nota: nota.trim() || 'Sin observaciones adicionales.',
+      nota: nota.trim(),
       currentStage,
-      loteId: selectedBatch ? selectedBatch.id : undefined,
-      loteCodigo: selectedBatch ? selectedBatch.codigo : undefined
+      loteCodigo: `REL-${fechaEntrega}`,
+      auditorAsignadoNombre: auditorAsignadoNombre.trim() || undefined,
+      tienePendienteBiopsia: currentStage === 'BIOPSIAS' ? true : record?.tienePendienteBiopsia,
+      medicoTratante: medicoTratante.trim().toUpperCase() || undefined,
+      vecesEnviadaBiopsia: Number(vecesEnviadaBiopsia) || 1,
+      descripcionBiopsia: descripcionBiopsia.trim().toUpperCase() || undefined
     });
 
     onClose();
   };
 
-  const isAuditorOrAdmin = canAuditRecord(activeUser.role);
+  const isAuditorOrAdmin = canAuditRecord(activeUser.role) || activeUser.role === 'ADMINISTRATIVO';
 
   return (
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto">
-      <div className="bg-white rounded-2xl max-w-2xl w-full shadow-2xl border border-slate-200 overflow-hidden my-8 animate-in fade-in zoom-in-95">
+      <div className="bg-white rounded-2xl max-w-2xl w-full shadow-2xl border border-slate-200 overflow-hidden my-6 animate-in fade-in zoom-in-95">
         {/* Header */}
         <div className="bg-slate-900 text-white px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
@@ -134,10 +136,10 @@ export const RecordModal: React.FC<RecordModalProps> = ({
             </div>
             <div>
               <h2 className="text-base font-bold">
-                {isEditing ? 'Editar Registro Clínico' : 'Nuevo Registro de Entrada'}
+                {isEditing ? 'Editar Registro Clínico' : 'Emitir / Registrar Expediente'}
               </h2>
               <p className="text-xs text-slate-400">
-                Gestión de Calidad Médica &bull; Control Documental y Glosas
+                Persistido directamente en Base de Datos SQLite &bull; Generado por {activeUser.name}
               </p>
             </div>
           </div>
@@ -150,51 +152,45 @@ export const RecordModal: React.FC<RecordModalProps> = ({
         </div>
 
         {/* Form Body */}
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          {/* Module Type Selector (if creating) */}
+        <form onSubmit={handleSubmit} className="p-5 space-y-4 max-h-[82vh] overflow-y-auto">
           {!isEditing && (
-            <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                Tipo de Registro
-              </label>
-              <div className="grid grid-cols-2 gap-3">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setType('EXPEDIENTE');
-                    setCurrentStage('RECEPCION');
-                  }}
-                  className={`flex items-center justify-center gap-2 p-3 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
-                    type === 'EXPEDIENTE'
-                      ? 'border-sky-500 bg-sky-50 text-sky-900 ring-2 ring-sky-400/20'
-                      : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
-                  }`}
-                >
-                  <FolderGit2 className="w-4 h-4 text-sky-600" />
-                  <span>Expediente Médico (Hospitalario)</span>
-                </button>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setType('EXPEDIENTE');
+                  setCurrentStage('RECEPCION');
+                }}
+                className={`flex items-center justify-center gap-2 p-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
+                  type === 'EXPEDIENTE'
+                    ? 'border-sky-500 bg-sky-50 text-sky-900 ring-2 ring-sky-400/20'
+                    : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                <FolderGit2 className="w-4 h-4 text-sky-600" />
+                <span>Expediente Hospitalario</span>
+              </button>
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    setType('EMERGENCIA');
-                    setCurrentStage('RECEPCION_EMERGENCIA');
-                  }}
-                  className={`flex items-center justify-center gap-2 p-3 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
-                    type === 'EMERGENCIA'
-                      ? 'border-rose-500 bg-rose-50 text-rose-900 ring-2 ring-rose-400/20'
-                      : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
-                  }`}
-                >
-                  <Flame className="w-4 h-4 text-rose-600" />
-                  <span>Emergencia</span>
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setType('EMERGENCIA');
+                  setCurrentStage('RECEPCION_EMERGENCIA');
+                }}
+                className={`flex items-center justify-center gap-2 p-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
+                  type === 'EMERGENCIA'
+                    ? 'border-rose-500 bg-rose-50 text-rose-900 ring-2 ring-rose-400/20'
+                    : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                <Flame className="w-4 h-4 text-rose-600" />
+                <span>Atención de Emergencia</span>
+              </button>
             </div>
           )}
 
-          {/* Patient and NAP row */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Paciente y NAP */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
                 Nombre del Paciente <span className="text-rose-500">*</span>
@@ -202,16 +198,16 @@ export const RecordModal: React.FC<RecordModalProps> = ({
               <input
                 type="text"
                 required
-                placeholder="EJ. JUAN PEREZ ROSARIO"
+                placeholder="EJ. RAMON ANTONIO RODRIGUEZ DE LOS SANTOS"
                 value={nombrePaciente}
                 onChange={(e) => setNombrePaciente(e.target.value)}
-                className="w-full text-xs font-semibold px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:ring-2 focus:ring-sky-500 outline-hidden uppercase"
+                className="w-full text-xs font-bold px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:ring-2 focus:ring-sky-500 outline-hidden uppercase"
               />
             </div>
 
             <div>
               <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                NAP (Número Autorización / Afiliado) <span className="text-rose-500">*</span>
+                NAP / Número de Autorización <span className="text-rose-500">*</span>
               </label>
               <input
                 type="text"
@@ -224,67 +220,42 @@ export const RecordModal: React.FC<RecordModalProps> = ({
             </div>
           </div>
 
-          {/* Lote / Ciclo Assignment Row */}
-          <div className="bg-indigo-50/60 border border-indigo-200 rounded-xl p-3">
-            <label className="block text-xs font-bold text-indigo-900 uppercase tracking-wider mb-1 flex items-center gap-1.5">
-              <Package className="w-4 h-4 text-indigo-600" />
-              Lote o Ciclo de Entrega / Recepción
-            </label>
-            <select
-              value={loteId}
-              onChange={(e) => setLoteId(e.target.value)}
-              className="w-full text-xs font-mono font-bold px-3 py-2 bg-white border border-indigo-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-hidden text-indigo-950"
-            >
-              <option value="">-- Sin lote específico asignado --</option>
-              {availableBatches.map(b => (
-                <option key={b.id} value={b.id}>
-                  {b.codigo} - {b.nombre} ({b.fechaCiclo})
-                </option>
-              ))}
-            </select>
-            <p className="text-[10px] text-indigo-700 mt-1">
-              Vincular a un lote agrupa el expediente en las relaciones de entrega por fecha.
-            </p>
-          </div>
-
-          {/* ARS and Dates row */}
+          {/* ARS y Fechas */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div>
               <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
                 Aseguradora (ARS)
               </label>
               {!isCustomArs ? (
-                <div className="space-y-1">
-                  <select
-                    value={ars}
-                    onChange={(e) => {
-                      if (e.target.value === '__OTHER__') {
-                        setIsCustomArs(true);
-                      } else {
-                        setArs(e.target.value);
-                      }
-                    }}
-                    className="w-full text-xs font-medium px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:ring-2 focus:ring-sky-500 outline-hidden"
-                  >
-                    {COMMON_ARS_LIST.map(a => (
-                      <option key={a} value={a}>{a}</option>
-                    ))}
-                    <option value="__OTHER__">+ Otra aseguradora...</option>
-                  </select>
-                </div>
+                <select
+                  value={ars}
+                  onChange={(e) => {
+                    if (e.target.value === '__OTHER__') {
+                      setIsCustomArs(true);
+                    } else {
+                      setArs(e.target.value);
+                    }
+                  }}
+                  className="w-full text-xs font-bold px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:ring-2 focus:ring-sky-500 outline-hidden"
+                >
+                  {COMMON_ARS_LIST.map(a => (
+                    <option key={a} value={a}>{a}</option>
+                  ))}
+                  <option value="__OTHER__">+ Otra ARS...</option>
+                </select>
               ) : (
                 <div className="flex gap-1">
                   <input
                     type="text"
-                    placeholder="Nombre de ARS"
+                    placeholder="Nombre ARS"
                     value={customArs}
                     onChange={(e) => setCustomArs(e.target.value)}
-                    className="w-full text-xs px-2 py-1.5 border border-slate-300 rounded-lg uppercase"
+                    className="w-full text-xs px-2 py-1.5 border border-slate-300 rounded-lg uppercase font-bold"
                   />
                   <button
                     type="button"
                     onClick={() => setIsCustomArs(false)}
-                    className="text-[10px] px-2 bg-slate-200 rounded"
+                    className="text-[10px] px-2 bg-slate-200 rounded font-bold"
                   >
                     Lista
                   </button>
@@ -294,7 +265,7 @@ export const RecordModal: React.FC<RecordModalProps> = ({
 
             <div>
               <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                F. CIERRE (Fecha Alta / Cierre)
+                Fecha Cierre / Ingreso
               </label>
               <input
                 type="date"
@@ -307,7 +278,7 @@ export const RecordModal: React.FC<RecordModalProps> = ({
 
             <div>
               <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                Fecha Entrega (Relación)
+                Fecha de Relación / Entrega
               </label>
               <input
                 type="date"
@@ -318,15 +289,104 @@ export const RecordModal: React.FC<RecordModalProps> = ({
             </div>
           </div>
 
-          {/* Financials Row: COBERTURA, MONTO GLOSADO, A PAGAR */}
-          <div className="p-4 bg-slate-50 rounded-xl border border-slate-200">
-            <div className="flex items-center justify-between mb-3">
+          {/* Etapa y Médico Auditor Asignado */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                Etapa Actual del Flujo
+              </label>
+              <select
+                value={currentStage}
+                onChange={(e) => setCurrentStage(e.target.value as AnyStageId)}
+                className="w-full text-xs font-bold px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:ring-2 focus:ring-sky-500 outline-hidden"
+              >
+                {availableStages.map(st => (
+                  <option key={st.id} value={st.id}>
+                    {st.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {type === 'EXPEDIENTE' && (
+              <div>
+                <label className="block text-xs font-bold text-amber-800 uppercase tracking-wider mb-1 flex items-center gap-1">
+                  <Stethoscope className="w-3.5 h-3.5 text-amber-600" />
+                  Médico Auditor Asignado
+                </label>
+                <select
+                  value={auditorAsignadoNombre}
+                  onChange={(e) => setAuditorAsignadoNombre(e.target.value)}
+                  className="w-full text-xs font-bold px-3 py-2 bg-amber-50 border border-amber-300 rounded-lg focus:bg-white focus:ring-2 focus:ring-amber-500 outline-hidden text-amber-950"
+                >
+                  <option value="">-- Sin asignar aún --</option>
+                  <option value="Dr. Marcos Tejada">Dr. Marcos Tejada</option>
+                  <option value="Dra. Elena Valerio">Dra. Elena Valerio</option>
+                  {auditorUsers
+                    .filter(u => u.name !== 'Dr. Marcos Tejada' && u.name !== 'Dra. Elena Valerio')
+                    .map(u => (
+                      <option key={u.id} value={u.name}>{u.name}</option>
+                    ))}
+                </select>
+              </div>
+            )}
+          </div>
+
+          {/* Sección de Biopsias / Histopatología (si está en BIOPSIAS o tiene datos de biopsia) */}
+          {(currentStage === 'BIOPSIAS' || record?.tienePendienteBiopsia) && (
+            <div className="p-3.5 bg-purple-50 border border-purple-200 rounded-xl space-y-3">
+              <div className="flex items-center gap-1.5 text-xs font-black text-purple-900 uppercase">
+                <Microscope className="w-4 h-4 text-purple-600" />
+                Datos para Solicitud de Reportes de Histopatología (Biopsias)
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-[11px] font-bold text-purple-900 uppercase mb-1">
+                    Médico Tratante / Cirujano
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="EJ. JUAN DAVID SUAREZ"
+                    value={medicoTratante}
+                    onChange={(e) => setMedicoTratante(e.target.value)}
+                    className="w-full text-xs font-bold px-2.5 py-1.5 bg-white border border-purple-300 rounded-lg uppercase"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-purple-900 uppercase mb-1">
+                    Veces Enviadas (1=Nueva, 2+=Pendiente)
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={20}
+                    value={vecesEnviadaBiopsia}
+                    onChange={(e) => setVecesEnviadaBiopsia(parseInt(e.target.value, 10) || 1)}
+                    className="w-full text-xs font-mono font-black px-2.5 py-1.5 bg-white border border-purple-300 rounded-lg text-center"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-purple-900 uppercase mb-1">
+                    Biopsia / Pieza Histopatológica
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="EJ. HERNIA DISCAL LUMBAR"
+                    value={descripcionBiopsia}
+                    onChange={(e) => setDescripcionBiopsia(e.target.value)}
+                    className="w-full text-xs font-bold px-2.5 py-1.5 bg-white border border-purple-300 rounded-lg uppercase"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Liquidación Financiera */}
+          <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200">
+            <div className="flex items-center justify-between mb-2">
               <span className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
                 <Calculator className="w-4 h-4 text-sky-600" />
-                Liquidación Financiera y Glosas
-              </span>
-              <span className="text-[11px] text-slate-500">
-                Fórmula: Cobertura - Monto Glosado = A Pagar
+                Montos de Cobertura y Glosas
               </span>
             </div>
 
@@ -343,21 +403,14 @@ export const RecordModal: React.FC<RecordModalProps> = ({
                   placeholder="0.00"
                   value={cobertura}
                   onChange={(e) => setCobertura(e.target.value)}
-                  className="w-full text-sm font-mono font-bold px-3 py-2 bg-white border border-slate-300 rounded-lg text-right focus:ring-2 focus:ring-sky-500 outline-hidden"
+                  className="w-full text-xs font-mono font-bold px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-right"
                 />
               </div>
 
               <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="block text-xs font-bold text-rose-600">
-                    MONTO GLOSADO (RD$)
-                  </label>
-                  {!isAuditorOrAdmin && (
-                    <span className="text-[9px] text-amber-600 font-semibold" title="Solo Auditores o Administradores modifican glosas">
-                      [Rol Auditor]
-                    </span>
-                  )}
-                </div>
+                <label className="block text-xs font-bold text-rose-600 mb-1">
+                  MONTO GLOSADO (RD$)
+                </label>
                 <input
                   type="number"
                   step="0.01"
@@ -366,75 +419,55 @@ export const RecordModal: React.FC<RecordModalProps> = ({
                   placeholder="0.00"
                   value={montoGlosado}
                   onChange={(e) => setMontoGlosado(e.target.value)}
-                  className={`w-full text-sm font-mono font-bold px-3 py-2 bg-white border border-rose-200 rounded-lg text-right text-rose-600 focus:ring-2 focus:ring-rose-500 outline-hidden ${
-                    !isAuditorOrAdmin && isEditing ? 'bg-slate-100 cursor-not-allowed opacity-75' : ''
-                  }`}
+                  className="w-full text-xs font-mono font-bold px-3 py-1.5 bg-white border border-rose-200 rounded-lg text-right text-rose-600"
                 />
               </div>
 
               <div>
                 <label className="block text-xs font-bold text-sky-700 mb-1">
-                  A PAGAR (RD$ Líquido)
+                  A PAGAR (RD$ Neto)
                 </label>
-                <div className="w-full text-sm font-mono font-black px-3 py-2 bg-sky-50 border border-sky-300 rounded-lg text-right text-sky-700">
+                <div className="w-full text-xs font-mono font-black px-3 py-1.5 bg-sky-50 border border-sky-300 rounded-lg text-right text-sky-700">
                   {formatCurrency(numAPagar)}
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Current Stage Selection */}
+          {/* Observaciones */}
           <div>
             <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-              Etapa en la Cadena de Seguimiento
+              Observación / Nota
             </label>
-            <select
-              value={currentStage}
-              onChange={(e) => setCurrentStage(e.target.value as AnyStageId)}
-              className="w-full text-xs font-semibold px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:ring-2 focus:ring-sky-500 outline-hidden"
-            >
-              {availableStages.map(st => (
-                <option key={st.id} value={st.id}>
-                  {st.order}. {st.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* NOTA */}
-          <div>
-            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-              NOTA / Observaciones de Entrada o Auditoría
-            </label>
-            <textarea
-              rows={2}
-              placeholder="Indique motivo de glosa, estado de biopsias, o detalles de radicación..."
+            <input
+              type="text"
+              placeholder="Observación breve de una línea..."
               value={nota}
               onChange={(e) => setNota(e.target.value)}
               className="w-full text-xs px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:ring-2 focus:ring-sky-500 outline-hidden"
             />
           </div>
 
-          {/* Submit Actions */}
+          {/* Botones */}
           <div className="pt-3 border-t border-slate-200 flex items-center justify-between">
             <div className="text-[11px] text-slate-500">
-              Registrado por: <span className="font-bold text-slate-700">{activeUser.name}</span> ({activeUser.roleName})
+              Operador: <span className="font-bold text-slate-800">{activeUser.name}</span> ({activeUser.roleName})
             </div>
 
             <div className="flex gap-2">
               <button
                 type="button"
                 onClick={onClose}
-                className="px-4 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
+                className="px-4 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg cursor-pointer"
               >
                 Cancelar
               </button>
               <button
                 type="submit"
-                className="inline-flex items-center gap-1.5 px-5 py-2 text-xs font-bold text-white bg-sky-600 hover:bg-sky-700 rounded-lg shadow-sm transition-colors cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-5 py-2 text-xs font-bold text-white bg-sky-600 hover:bg-sky-700 rounded-lg shadow-sm cursor-pointer"
               >
                 <Save className="w-4 h-4" />
-                <span>Guardar Registro</span>
+                <span>Guardar en Base de Datos</span>
               </button>
             </div>
           </div>
