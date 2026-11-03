@@ -90,7 +90,7 @@ export const DatabasePerformanceView: React.FC<DatabasePerformanceViewProps> = (
       const sampleExternal = Array.from({ length: 300 }).map((_, i) => ({
         nombrePaciente: `PACIENTE EXTERNO HIS #${i + 1}`,
         nap: `EXT-${Math.floor(100000 + Math.random() * 900000)}`,
-        ars: 'ARS SENASA',
+        ars: 'ASEGURADORA ALFA',
         fechaCierre: '2026-11-02',
         cobertura: 15000,
         montoGlosado: 0,

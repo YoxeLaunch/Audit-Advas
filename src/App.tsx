@@ -89,13 +89,7 @@ export default function App() {
     }
   });
 
-  const [arsConfigs, setArsConfigs] = useState<ArsExpirationConfig[]>(() =>
-    COMMON_ARS_LIST.map(name => ({
-      ars_name: name,
-      short_name: name,
-      dias_vigencia: name === 'PRIMERA' || name === 'HUMANO' || name === 'UNIVERSAL' ? 90 : 60
-    }))
-  );
+  const [arsConfigs, setArsConfigs] = useState<ArsExpirationConfig[]>([]);
 
   // View & Filter State
   const [currentType, setCurrentType] = useState<RecordType>('EXPEDIENTE');
@@ -129,7 +123,7 @@ export default function App() {
   }>({
     records: [],
     title: '',
-    ars: 'SENASA',
+    ars: 'TODAS',
     deliveryDate: new Date().toISOString().split('T')[0]
   });
 
@@ -321,11 +315,11 @@ export default function App() {
         saveStoredRecords(recData.records);
       }
 
-      if (cfgData && cfgData.length > 0) {
+      if (cfgData && Array.isArray(cfgData)) {
         setArsConfigs(cfgData);
       }
 
-      if (usrData && usrData.length > 0) {
+      if (usrData && Array.isArray(usrData)) {
         setUsers(usrData);
         saveStoredUsers(usrData);
       }
@@ -545,13 +539,14 @@ export default function App() {
         changedBy: operatorLabel
       };
 
+      const cleanArs = (recordData.ars || 'SIN ASEGURADORA').toUpperCase().trim();
       const newRecord: MedicalRecordItem = {
         id: `rec_${Date.now()}`,
         numero: nextNumero,
         type: recordData.type || currentType,
         nombrePaciente: (recordData.nombrePaciente || 'PACIENTE SIN NOMBRE').toUpperCase(),
         nap: recordData.nap || 'SIN-NAP',
-        ars: recordData.ars || 'SENASA',
+        ars: cleanArs,
         fechaCierre: recordData.fechaCierre || todayIso,
         fechaRecepcion: todayIso,
         fechaEntrega: recordData.fechaEntrega || todayIso,
@@ -576,6 +571,18 @@ export default function App() {
         conciliadoAdmin: false
       };
 
+      if (
+        cleanArs &&
+        cleanArs !== 'SIN ASEGURADORA' &&
+        cleanArs !== 'TODAS' &&
+        !arsConfigs.some(c => c.ars_name.toUpperCase() === cleanArs)
+      ) {
+        setArsConfigs(prev => [
+          ...prev,
+          { ars_name: cleanArs, short_name: cleanArs, dias_vigencia: 60 }
+        ]);
+      }
+
       updateRecordsState([newRecord, ...records]);
       await persistSingleRecord(newRecord, true);
       showToast(`✓ Nuevo registro guardado en base de datos: ${newRecord.nombrePaciente} (Generado por ${operatorLabel})`);
@@ -587,7 +594,7 @@ export default function App() {
     const timestamp = new Date().toLocaleString('es-DO');
     const operatorLabel = activeUser ? `${activeUser.name} (${activeUser.roleName})` : 'Administrativo';
     const targetStage: AnyStageId = record.type === 'EXPEDIENTE' ? 'AUDITORIA' : 'ENTREGA_ARS_EMERGENCIA';
-    const assignedAuditor = auditorName || record.auditorAsignadoNombre || 'Dr. Marcos Tejada';
+    const assignedAuditor = auditorName || record.auditorAsignadoNombre || 'Auditoría Médica';
 
     const noteItem: RecordNote = {
       id: `n_${Date.now()}`,
@@ -638,7 +645,7 @@ export default function App() {
   const handleBulkConciliate = async (recordIds: string[], auditorName?: string) => {
     const timestamp = new Date().toLocaleString('es-DO');
     const operatorLabel = activeUser ? `${activeUser.name} (${activeUser.roleName})` : 'Administrativo';
-    const assignedAuditor = auditorName || 'Dr. Marcos Tejada';
+    const assignedAuditor = auditorName || 'Auditoría Médica';
 
     const updated = records.map(r => {
       if (recordIds.includes(r.id)) {
@@ -1082,9 +1089,15 @@ export default function App() {
     setOfficialReportModalOpen(true);
   };
 
-  // Si no hay usuario logueado, mostrar pantalla de inicio de sesión
+  // Si no hay usuario logueado, mostrar pantalla de inicio de sesión o configuración desde cero
   if (!activeUser) {
-    return <LoginView onLoginSuccess={handleLoginSuccess} />;
+    return (
+      <LoginView
+        users={users}
+        onLoginSuccess={handleLoginSuccess}
+        onUserCreated={u => setUsers(prev => [...prev, u])}
+      />
+    );
   }
 
   const totalExpedientes = records.filter(r => r.type === 'EXPEDIENTE').length;
@@ -1238,6 +1251,7 @@ export default function App() {
         defaultStage={selectedStage !== 'ALL' ? selectedStage : (currentType === 'EXPEDIENTE' ? 'RECEPCION' : 'RECEPCION_EMERGENCIA')}
         activeUser={activeUser}
         users={users}
+        arsConfigs={arsConfigs}
         onSave={handleSaveRecord}
       />
 

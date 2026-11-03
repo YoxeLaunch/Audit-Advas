@@ -191,10 +191,10 @@ export type BatchStatus = 'ABIERTO' | 'EN_AUDITORIA' | 'ENTREGADO' | 'FACTURADO'
 
 export interface DeliveryBatch {
   id: string;
-  codigo: string;          // e.g. "LOTE-2026-10-31-SENASA-01"
-  nombre: string;          // e.g. "Corte Diario SeNaSa - 26 Casos"
+  codigo: string;          // e.g. "LOTE-2026-10-31-01"
+  nombre: string;          // e.g. "Corte Diario - 26 Casos"
   tipo: RecordType;        // 'EXPEDIENTE' | 'EMERGENCIA'
-  ars: string;             // 'ARS SENASA', 'PRIMERA ARS', 'TODAS'
+  ars: string;             // Nombre de Aseguradora configurada o 'TODAS'
   etapa: AnyStageId;       // Current or target stage of the batch
   fechaCiclo: string;      // Date of the cycle (YYYY-MM-DD)
   fechaEntrega?: string;   // Date delivered
@@ -217,7 +217,7 @@ export interface MedicalRecordItem {
   fechaEntrega?: string;     // FECHA ENTREGA (for report)
   nombrePaciente: string;    // NOMBRE PACIENTE
   nap: string;               // NAP (Número de Autorización / Afiliado)
-  ars: string;               // e.g. ARS SENASA, PRIMERA ARS, etc.
+  ars: string;               // Aseguradora / Entidad configurada desde cero
   nota: string;              // Current main note
   cobertura: number;         // COBERTURA
   montoGlosado: number;      // MONTO GLOSADO
@@ -405,16 +405,5 @@ export const EMERGENCIA_STAGES: StageConfig[] = [
   }
 ];
 
-export const COMMON_ARS_LIST = [
-  'PRIMERA',
-  'HUMANO',
-  'SENASA',
-  'UNIVERSAL',
-  'SEMMA',
-  'MONUMENTAL',
-  'ARS RESERVAS',
-  'FUTURO',
-  'RENACER',
-  'IDOPPRIL',
-  'UAS'
-];
+// Lista inicial vacía: las aseguradoras / entidades se crean desde cero en el sistema
+export const COMMON_ARS_LIST: string[] = [];

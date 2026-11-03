@@ -121,13 +121,13 @@ export const TableView: React.FC<TableViewProps> = ({
   const [selectedAuditorTab, setSelectedAuditorTab] = useState<string>('TODOS');
   const [biopsiaSubView, setBiopsiaSubView] = useState<'ACTIVAS' | 'COMPLETADAS'>('ACTIVAS');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [assignAuditorName, setAssignAuditorName] = useState<string>('Dr. Marcos Tejada');
+  const [assignAuditorName, setAssignAuditorName] = useState<string>('');
 
   // Quick Add Inline State
   const [showQuickAdd, setShowQuickAdd] = useState(false);
   const [quickPaciente, setQuickPaciente] = useState('');
   const [quickNap, setQuickNap] = useState('');
-  const [quickArs, setQuickArs] = useState('SENASA');
+  const [quickArs, setQuickArs] = useState('');
   const [quickCobertura, setQuickCobertura] = useState('');
   const [quickGlosado, setQuickGlosado] = useState('0');
   const [quickNota, setQuickNota] = useState('');
@@ -137,7 +137,7 @@ export const TableView: React.FC<TableViewProps> = ({
   const [quickBiopsiaDesc, setQuickBiopsiaDesc] = useState('');
   const [quickEnviadas, setQuickEnviadas] = useState(1);
 
-  // Mapa de días de vigencia por ARS (ej. SENASA: 60, HUMANO: 90)
+  // Mapa de días de vigencia por ARS configuradas en el sistema
   const arsConfigMap = useMemo(() => {
     const map: Record<string, number> = {};
     for (const c of arsConfigs) {
@@ -146,12 +146,14 @@ export const TableView: React.FC<TableViewProps> = ({
     return map;
   }, [arsConfigs]);
 
-  // Lista de pestañas ARS tipo Excel
+  // Lista dinámica de pestañas ARS tipo Excel (creadas desde cero por el usuario o presentes en registros)
   const arsTabsList = useMemo(() => {
-    const fromConfig = arsConfigs.map(c => c.ars_name);
-    const combined = Array.from(new Set([...COMMON_ARS_LIST, ...fromConfig]));
-    return combined;
-  }, [arsConfigs]);
+    const fromConfig = arsConfigs.map(c => c.ars_name.toUpperCase().trim()).filter(Boolean);
+    const fromRecords = records
+      .filter(r => r.type === type && r.ars && r.ars !== 'SIN ASEGURADORA' && r.ars !== 'TODAS')
+      .map(r => normalizeArsName(r.ars));
+    return Array.from(new Set([...COMMON_ARS_LIST, ...fromConfig, ...fromRecords]));
+  }, [arsConfigs, records, type]);
 
   // Determinar si en la etapa actual corresponde mostrar la barra de pestañas por ARS tipo Excel:
   // REGLA DEL USUARIO: Solo en el área de Administrativos al entregar a ARS o Facturación y cuando Facturación recibe al final.
@@ -179,7 +181,7 @@ export const TableView: React.FC<TableViewProps> = ({
     activeUser.role === 'AUDITOR_MEDICO' ||
     activeUser.role === 'AUDITOR';
 
-  // Lista de Auditores Médicos para las pestañas tipo Excel de Auditoría Interna
+  // Lista de Auditores Médicos para las pestañas tipo Excel de Auditoría Interna (creados desde cero)
   const auditorTabs = useMemo(() => {
     const fromUsers = users
       .filter(u => u.role === 'AUDITOR_MEDICO' || u.role === 'AUDITOR')
@@ -187,7 +189,7 @@ export const TableView: React.FC<TableViewProps> = ({
     const fromRecords = records
       .map(r => r.auditorAsignadoNombre)
       .filter((n): n is string => Boolean(n));
-    return Array.from(new Set(['Dr. Marcos Tejada', 'Dra. Elena Valerio', ...fromUsers, ...fromRecords]));
+    return Array.from(new Set([...fromUsers, ...fromRecords]));
   }, [users, records]);
 
   // Permisos RBAC
@@ -232,13 +234,13 @@ export const TableView: React.FC<TableViewProps> = ({
         r.entregadoArsPor ||
         r.conciliadoPor ||
         r.createdBy ||
-        'Roberto Santos (Facturación)';
+        activeUser.name;
       const recPor =
         r.facturacionConfirmadaPor ||
         r.recibidoArsPor ||
         r.auditorAsignadoNombre ||
         r.conciliadoPor ||
-        'Lic. Ana Patricia Martínez (Auditoría)';
+        'Área Receptora';
       if (existing) {
         existing.count += 1;
       } else {
@@ -323,24 +325,24 @@ export const TableView: React.FC<TableViewProps> = ({
     );
   }, [filteredRecords]);
 
-  // Trazabilidad de quién entrega y quién recibe en la relación actual
+  // Trazabilidad de quién entrega y quién recibe en la relación actual (basado en datos reales creados)
   const currentCustodyInfo = useMemo(() => {
     const sample = filteredRecords[0];
     if (selectedStage === 'RECEPCION' || selectedStage === 'RECEPCION_EMERGENCIA') {
       return {
-        entregadoPor: sample?.createdBy || 'Roberto Santos (Facturación)',
-        recibidoPor: sample?.conciliadoPor || 'Lic. Ana Patricia Martínez (Administrativo de Auditoría)'
+        entregadoPor: sample?.createdBy || `${activeUser.name} (Emisión Facturación)`,
+        recibidoPor: sample?.conciliadoPor || 'Recepción Administrativa de Auditoría'
       };
     }
     if (selectedStage === 'CONCILIACION_ADMIN' || selectedStage === 'RECEPCION_ADMIN_EMERGENCIA') {
       return {
-        entregadoPor: sample?.createdBy || 'Roberto Santos (Facturación)',
+        entregadoPor: sample?.createdBy || 'Emisión Facturación',
         recibidoPor: sample?.conciliadoPor || `${activeUser.name} (Administrativo)`
       };
     }
     if (selectedStage === 'AUDITORIA') {
       return {
-        entregadoPor: sample?.conciliadoPor || 'Lic. Ana Patricia Martínez (Administrativo)',
+        entregadoPor: sample?.conciliadoPor || `${activeUser.name} (Administrativo)`,
         recibidoPor:
           selectedAuditorTab !== 'TODOS'
             ? `${selectedAuditorTab} (Auditor Médico)`
@@ -349,29 +351,29 @@ export const TableView: React.FC<TableViewProps> = ({
     }
     if (selectedStage === 'RECEPCION_AUDITORES') {
       return {
-        entregadoPor: sample?.auditorAsignadoNombre || 'Dra. Elena Valerio / Dr. Marcos Tejada (Auditoría)',
-        recibidoPor: sample?.recepcionAuditoresPor || 'Lic. Ana Patricia Martínez (Administrativo)'
+        entregadoPor: sample?.auditorAsignadoNombre || 'Auditoría Médica Interna',
+        recibidoPor: sample?.recepcionAuditoresPor || `${activeUser.name} (Administrativo)`
       };
     }
     if (selectedStage === 'BIOPSIAS') {
       return {
-        entregadoPor: sample?.createdBy || 'Lic. Ana Patricia Martínez (Administrativo)',
+        entregadoPor: sample?.createdBy || `${activeUser.name} (Administrativo)`,
         recibidoPor: 'Departamento de Patología / Histopatología'
       };
     }
     if (selectedStage === 'ENTREGA_ARS' || selectedStage === 'ENTREGA_ARS_EMERGENCIA') {
       return {
-        entregadoPor: sample?.entregadoArsPor || 'Lic. Ana Patricia Martínez (Administrativo)',
+        entregadoPor: sample?.entregadoArsPor || `${activeUser.name} (Administrativo)`,
         recibidoPor:
           selectedArsTab !== 'TODAS'
-            ? `Aseguradora ARS ${selectedArsTab}`
-            : sample?.recibidoArsPor || 'Aseguradoras ARS Correspondientes'
+            ? `Aseguradora ${selectedArsTab}`
+            : sample?.recibidoArsPor || 'Aseguradoras Correspondientes'
       };
     }
     if (selectedStage === 'FACTURACION' || selectedStage === 'FACTURACION_EMERGENCIA') {
       return {
-        entregadoPor: sample?.entregadoFacturacionPor || 'Lic. Ana Patricia Martínez (Administrativo)',
-        recibidoPor: sample?.facturacionConfirmadaPor || 'Roberto Santos (Facturación Final)'
+        entregadoPor: sample?.entregadoFacturacionPor || 'Administrativo de Auditoría',
+        recibidoPor: sample?.facturacionConfirmadaPor || `${activeUser.name} (Facturación Final)`
       };
     }
     return {
@@ -412,11 +414,17 @@ export const TableView: React.FC<TableViewProps> = ({
         ? 'RECEPCION'
         : 'RECEPCION_EMERGENCIA';
 
+    const chosenArs = (
+      showExcelArsTabs && selectedArsTab !== 'TODAS'
+        ? selectedArsTab
+        : quickArs || arsTabsList[0] || 'SIN ASEGURADORA'
+    ).toUpperCase().trim();
+
     onQuickAdd({
       type,
       nombrePaciente: quickPaciente.trim().toUpperCase(),
       nap: quickNap.trim(),
-      ars: showExcelArsTabs && selectedArsTab !== 'TODAS' ? selectedArsTab : quickArs,
+      ars: chosenArs,
       fechaCierre: quickFechaCierre,
       fechaEntrega: selectedDateRelation !== 'ALL' ? selectedDateRelation : quickFechaEntrega,
       cobertura: cob,
@@ -505,10 +513,11 @@ export const TableView: React.FC<TableViewProps> = ({
           <button
             type="button"
             onClick={onOpenArsConfig}
-            className="ml-1 px-2 py-1 text-xs font-bold text-slate-600 hover:text-slate-900 hover:bg-slate-200 rounded cursor-pointer shrink-0 flex items-center gap-1"
-            title="Añadir nueva pestaña ARS o configurar meses de vencimiento"
+            className="ml-1 px-2.5 py-1 text-xs font-bold text-sky-800 bg-sky-100 hover:bg-sky-200 border border-sky-300 rounded cursor-pointer shrink-0 flex items-center gap-1"
+            title="Añadir o configurar Aseguradoras (ARS) y sus meses de vencimiento"
           >
             <Plus className="w-3.5 h-3.5" />
+            <span>{arsTabsList.length === 0 ? 'Crear Aseguradoras (ARS)' : '+'}</span>
           </button>
         )}
       </div>
@@ -735,17 +744,27 @@ export const TableView: React.FC<TableViewProps> = ({
             <div className="flex items-center gap-1.5 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-lg text-xs">
               <Stethoscope className="w-3.5 h-3.5 text-amber-600" />
               <span className="font-bold text-amber-900 text-[11px]">Asignar a Auditor:</span>
-              <select
-                value={assignAuditorName}
-                onChange={e => setAssignAuditorName(e.target.value)}
-                className="font-bold text-amber-950 bg-white border border-amber-300 rounded px-2 py-0.5 text-xs outline-hidden"
-              >
-                {auditorTabs.map(a => (
-                  <option key={a} value={a}>
-                    {a}
-                  </option>
-                ))}
-              </select>
+              {auditorTabs.length > 0 ? (
+                <select
+                  value={assignAuditorName || auditorTabs[0]}
+                  onChange={e => setAssignAuditorName(e.target.value)}
+                  className="font-bold text-amber-950 bg-white border border-amber-300 rounded px-2 py-0.5 text-xs outline-hidden"
+                >
+                  {auditorTabs.map(a => (
+                    <option key={a} value={a}>
+                      {a}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type="text"
+                  placeholder="Nombre de Auditor..."
+                  value={assignAuditorName}
+                  onChange={e => setAssignAuditorName(e.target.value)}
+                  className="font-bold text-amber-950 bg-white border border-amber-300 rounded px-2 py-0.5 text-xs w-36 outline-hidden"
+                />
+              )}
             </div>
           )}
 
@@ -870,17 +889,28 @@ export const TableView: React.FC<TableViewProps> = ({
               onChange={e => setQuickNap(e.target.value)}
               className="w-32 px-2.5 py-1 bg-white border border-amber-300 rounded font-mono font-bold text-xs"
             />
-            <select
-              value={quickArs}
-              onChange={e => setQuickArs(e.target.value)}
-              className="px-2 py-1 bg-white border border-amber-300 rounded font-bold text-xs"
-            >
-              {arsTabsList.map(a => (
-                <option key={a} value={a}>
-                  {a}
-                </option>
-              ))}
-            </select>
+            {arsTabsList.length > 0 ? (
+              <select
+                value={quickArs || arsTabsList[0]}
+                onChange={e => setQuickArs(e.target.value)}
+                className="px-2 py-1 bg-white border border-amber-300 rounded font-bold text-xs"
+              >
+                {arsTabsList.map(a => (
+                  <option key={a} value={a}>
+                    {a}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                type="text"
+                required
+                placeholder="ASEGURADORA / ENTIDAD"
+                value={quickArs}
+                onChange={e => setQuickArs(e.target.value)}
+                className="w-40 px-2.5 py-1 bg-white border border-amber-300 rounded font-bold uppercase text-xs"
+              />
+            )}
 
             {isBiopsiasStage ? (
               <>

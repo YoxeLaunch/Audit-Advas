@@ -196,6 +196,8 @@ apiRouter.post('/records', (req, res) => {
     const aPagar = Math.max(0, cobertura - montoGlosado);
     const todayIso = new Date().toISOString().split('T')[0];
 
+    const cleanArs = (data.ars || 'SIN ASEGURADORA').toUpperCase().trim();
+
     stmt.run(
       id,
       Number(data.numero || 1),
@@ -206,7 +208,7 @@ apiRouter.post('/records', (req, res) => {
       data.fechaEntrega || todayIso,
       data.nombrePaciente || 'PACIENTE SIN NOMBRE',
       data.nap || 'SIN-NAP',
-      data.ars || 'SENASA',
+      cleanArs,
       data.nota || '',
       cobertura,
       montoGlosado,
@@ -228,6 +230,13 @@ apiRouter.post('/records', (req, res) => {
       timestamp,
       data.updatedBy || data.createdBy || 'Sistema'
     );
+
+    if (cleanArs && cleanArs !== 'SIN ASEGURADORA' && cleanArs !== 'TODAS') {
+      db.prepare(`
+        INSERT OR IGNORE INTO ars_config (ars_name, short_name, dias_vigencia, updated_at, updated_by)
+        VALUES (?, ?, 60, ?, ?)
+      `).run(cleanArs, cleanArs, timestamp, data.createdBy || 'Sistema');
+    }
 
     const created = db.prepare('SELECT * FROM records WHERE id = ?').get(id);
     res.status(201).json({ success: true, record: mapRowToRecord(created) });
@@ -456,16 +465,13 @@ apiRouter.put('/ars-config', (req, res) => {
     }
     const timestamp = new Date().toLocaleString('es-DO');
     db.exec('BEGIN TRANSACTION;');
+    db.exec('DELETE FROM ars_config;');
     const stmt = db.prepare(`
       INSERT INTO ars_config (ars_name, short_name, dias_vigencia, updated_at, updated_by)
       VALUES (?, ?, ?, ?, ?)
-      ON CONFLICT(ars_name) DO UPDATE SET
-        short_name = excluded.short_name,
-        dias_vigencia = excluded.dias_vigencia,
-        updated_at = excluded.updated_at,
-        updated_by = excluded.updated_by
     `);
     for (const c of configs) {
+      if (!c.ars_name || !c.ars_name.trim()) continue;
       stmt.run(
         c.ars_name.toUpperCase().trim(),
         (c.short_name || c.ars_name).toUpperCase().trim(),
@@ -578,9 +584,10 @@ apiRouter.post('/test/stress-generate', (req, res) => {
     const count = Math.min(20000, Math.max(100, parseInt(req.body.count || 2000, 10)));
     const startTime = performance.now();
 
-    const nombres = ['JUAN CARLOS', 'MARIA ELENA', 'PEDRO JOSE', 'ANA MERCEDES', 'RAMON ANTONIO', 'CARMEN ROSA', 'LUIS ALBERTO', 'FRANCISCO JAVIER', 'YOMAIRA', 'WILSON', 'YUDELKA', 'ENMANUEL'];
-    const apellidos = ['SANTANA', 'RODRIGUEZ', 'PEREZ', 'GOMEZ', 'MARTINEZ', 'VALERIO', 'HERNANDEZ', 'CASTILLO', 'FELIZ', 'DE LOS SANTOS', 'BATISTA', 'ALMONTE'];
-    const arss = ['SENASA', 'PRIMERA', 'HUMANO', 'UNIVERSAL', 'SEMMA', 'MONUMENTAL', 'ARS RESERVAS', 'FUTURO', 'RENACER'];
+    const configuredArsRows = db.prepare('SELECT ars_name FROM ars_config').all();
+    const arss = configuredArsRows.length > 0
+      ? configuredArsRows.map(r => r.ars_name)
+      : ['ASEGURADORA ALFA', 'SEGURO BETA', 'COBERTURA GLOBAL', 'PLAN SALUD NORTE'];
     const etapas = ['RECEPCION', 'CONCILIACION_ADMIN', 'AUDITORIA', 'RECEPCION_AUDITORES', 'BIOPSIAS', 'ENTREGA_ARS', 'FACTURACION'];
 
     const currentMax = db.prepare('SELECT MAX(numero) as maxNum FROM records').get()?.maxNum || 0;
@@ -602,10 +609,7 @@ apiRouter.post('/test/stress-generate', (req, res) => {
     const nowIso = new Date().toISOString().split('T')[0];
 
     for (let i = 1; i <= count; i++) {
-      const nom = nombres[Math.floor(Math.random() * nombres.length)];
-      const ape = apellidos[Math.floor(Math.random() * apellidos.length)];
-      const ape2 = apellidos[Math.floor(Math.random() * apellidos.length)];
-      const paciente = `${nom} ${ape} ${ape2}`;
+      const paciente = `PACIENTE SIMULADO #${currentMax + i}`;
       const ars = arss[Math.floor(Math.random() * arss.length)];
       const etapa = etapas[Math.floor(Math.random() * etapas.length)];
       const cobertura = Math.floor(Math.random() * 25000) + 1200;
@@ -708,7 +712,7 @@ apiRouter.post('/sync/import-records', (req, res) => {
         r.fechaEntrega || '2026-11-02',
         r.nombrePaciente || 'PACIENTE EXTERNO',
         r.nap || 'SIN-NAP',
-        r.ars || 'SENASA',
+        r.ars || 'ASEGURADORA GENERAL',
         r.nota || `Importado desde ${sourceSystem}`,
         cob,
         glo,

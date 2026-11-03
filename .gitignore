@@ -7,5 +7,6 @@ coverage/
 .env*
 !.env.example
 .aistudio/
+data/*.sqlite
 data/*.sqlite-wal
 data/*.sqlite-shm

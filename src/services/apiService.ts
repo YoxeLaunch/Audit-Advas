@@ -143,6 +143,19 @@ export async function apiUpdateUser(user: User): Promise<void> {
   if (!data.success) throw new Error(data.error || 'Error actualizando usuario');
 }
 
+export async function apiLogin(email: string, password: string): Promise<User> {
+  const res = await fetch('/api/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password })
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) {
+    throw new Error(data.error || 'Credenciales inválidas');
+  }
+  return data.user;
+}
+
 export async function apiRunStressTest(count: number = 2000): Promise<{
   insertedCount: number;
   totalInDatabase: number;

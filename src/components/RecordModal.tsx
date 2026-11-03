@@ -14,7 +14,7 @@ import {
   AnyStageId, 
   User, 
   DeliveryBatch,
-  COMMON_ARS_LIST,
+  ArsExpirationConfig,
   EXPEDIENTE_STAGES,
   EMERGENCIA_STAGES
 } from '../types';
@@ -29,6 +29,7 @@ interface RecordModalProps {
   defaultStage: AnyStageId;
   activeUser: User;
   users?: User[];
+  arsConfigs?: ArsExpirationConfig[];
   onSave: (recordData: Partial<MedicalRecordItem>) => void;
 }
 
@@ -40,19 +41,27 @@ export const RecordModal: React.FC<RecordModalProps> = ({
   defaultStage,
   activeUser,
   users = [],
+  arsConfigs = [],
   onSave
 }) => {
   if (!isOpen) return null;
 
   const isEditing = Boolean(record);
   const todayIso = new Date().toISOString().split('T')[0];
+  const configuredArsNames = arsConfigs.map(c => c.ars_name);
 
   const [type, setType] = useState<RecordType>(record?.type || defaultType);
   const [nombrePaciente, setNombrePaciente] = useState(record?.nombrePaciente || '');
   const [nap, setNap] = useState(record?.nap || '');
-  const [ars, setArs] = useState(normalizeArsName(record?.ars || 'SENASA'));
-  const [customArs, setCustomArs] = useState('');
-  const [isCustomArs, setIsCustomArs] = useState(false);
+  const [ars, setArs] = useState(
+    record?.ars ? normalizeArsName(record.ars) : configuredArsNames[0] || ''
+  );
+  const [customArs, setCustomArs] = useState(
+    record?.ars && !configuredArsNames.includes(normalizeArsName(record.ars))
+      ? normalizeArsName(record.ars)
+      : ''
+  );
+  const [isCustomArs, setIsCustomArs] = useState(configuredArsNames.length === 0);
   const [fechaCierre, setFechaCierre] = useState(record?.fechaCierre || todayIso);
   const [fechaEntrega, setFechaEntrega] = useState(record?.fechaEntrega || todayIso);
   const [cobertura, setCobertura] = useState<string>(
@@ -97,7 +106,11 @@ export const RecordModal: React.FC<RecordModalProps> = ({
       return;
     }
 
-    const finalArs = isCustomArs ? (customArs.trim().toUpperCase() || 'SENASA') : ars;
+    const finalArs = (isCustomArs ? customArs : ars).trim().toUpperCase();
+    if (!finalArs) {
+      alert('Por favor ingrese o seleccione la Aseguradora / Entidad.');
+      return;
+    }
 
     onSave({
       ...(record ? { id: record.id } : {}),
@@ -198,7 +211,7 @@ export const RecordModal: React.FC<RecordModalProps> = ({
               <input
                 type="text"
                 required
-                placeholder="EJ. RAMON ANTONIO RODRIGUEZ DE LOS SANTOS"
+                placeholder="EJ. NOMBRE COMPLETO DEL PACIENTE"
                 value={nombrePaciente}
                 onChange={(e) => setNombrePaciente(e.target.value)}
                 className="w-full text-xs font-bold px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:ring-2 focus:ring-sky-500 outline-hidden uppercase"
@@ -212,7 +225,7 @@ export const RecordModal: React.FC<RecordModalProps> = ({
               <input
                 type="text"
                 required
-                placeholder="EJ. 8492048-1"
+                placeholder="EJ. AUT-000123-1"
                 value={nap}
                 onChange={(e) => setNap(e.target.value)}
                 className="w-full text-xs font-mono font-bold px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:ring-2 focus:ring-sky-500 outline-hidden"
@@ -224,9 +237,9 @@ export const RecordModal: React.FC<RecordModalProps> = ({
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div>
               <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                Aseguradora (ARS)
+                Aseguradora / Entidad <span className="text-rose-500">*</span>
               </label>
-              {!isCustomArs ? (
+              {!isCustomArs && configuredArsNames.length > 0 ? (
                 <select
                   value={ars}
                   onChange={(e) => {
@@ -238,27 +251,30 @@ export const RecordModal: React.FC<RecordModalProps> = ({
                   }}
                   className="w-full text-xs font-bold px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:ring-2 focus:ring-sky-500 outline-hidden"
                 >
-                  {COMMON_ARS_LIST.map(a => (
+                  {configuredArsNames.map(a => (
                     <option key={a} value={a}>{a}</option>
                   ))}
-                  <option value="__OTHER__">+ Otra ARS...</option>
+                  <option value="__OTHER__">+ Crear / Otra Aseguradora...</option>
                 </select>
               ) : (
                 <div className="flex gap-1">
                   <input
                     type="text"
-                    placeholder="Nombre ARS"
+                    required
+                    placeholder="Ej. ASEGURADORA ALFA"
                     value={customArs}
                     onChange={(e) => setCustomArs(e.target.value)}
-                    className="w-full text-xs px-2 py-1.5 border border-slate-300 rounded-lg uppercase font-bold"
+                    className="w-full text-xs px-2.5 py-2 bg-slate-50 border border-slate-300 rounded-lg uppercase font-bold"
                   />
-                  <button
-                    type="button"
-                    onClick={() => setIsCustomArs(false)}
-                    className="text-[10px] px-2 bg-slate-200 rounded font-bold"
-                  >
-                    Lista
-                  </button>
+                  {configuredArsNames.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setIsCustomArs(false)}
+                      className="text-[10px] px-2 bg-slate-200 rounded font-bold cursor-pointer"
+                    >
+                      Lista
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -314,20 +330,26 @@ export const RecordModal: React.FC<RecordModalProps> = ({
                   <Stethoscope className="w-3.5 h-3.5 text-amber-600" />
                   Médico Auditor Asignado
                 </label>
-                <select
-                  value={auditorAsignadoNombre}
-                  onChange={(e) => setAuditorAsignadoNombre(e.target.value)}
-                  className="w-full text-xs font-bold px-3 py-2 bg-amber-50 border border-amber-300 rounded-lg focus:bg-white focus:ring-2 focus:ring-amber-500 outline-hidden text-amber-950"
-                >
-                  <option value="">-- Sin asignar aún --</option>
-                  <option value="Dr. Marcos Tejada">Dr. Marcos Tejada</option>
-                  <option value="Dra. Elena Valerio">Dra. Elena Valerio</option>
-                  {auditorUsers
-                    .filter(u => u.name !== 'Dr. Marcos Tejada' && u.name !== 'Dra. Elena Valerio')
-                    .map(u => (
+                {auditorUsers.length > 0 ? (
+                  <select
+                    value={auditorAsignadoNombre}
+                    onChange={(e) => setAuditorAsignadoNombre(e.target.value)}
+                    className="w-full text-xs font-bold px-3 py-2 bg-amber-50 border border-amber-300 rounded-lg focus:bg-white focus:ring-2 focus:ring-amber-500 outline-hidden text-amber-950"
+                  >
+                    <option value="">-- Sin asignar aún --</option>
+                    {auditorUsers.map(u => (
                       <option key={u.id} value={u.name}>{u.name}</option>
                     ))}
-                </select>
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    placeholder="Cree un Auditor en Usuarios o escriba su nombre..."
+                    value={auditorAsignadoNombre}
+                    onChange={(e) => setAuditorAsignadoNombre(e.target.value)}
+                    className="w-full text-xs font-bold px-3 py-2 bg-amber-50 border border-amber-300 rounded-lg focus:bg-white focus:ring-2 focus:ring-amber-500 outline-hidden text-amber-950"
+                  />
+                )}
               </div>
             )}
           </div>
@@ -346,7 +368,7 @@ export const RecordModal: React.FC<RecordModalProps> = ({
                   </label>
                   <input
                     type="text"
-                    placeholder="EJ. JUAN DAVID SUAREZ"
+                    placeholder="EJ. DR. MEDICO TRATANTE"
                     value={medicoTratante}
                     onChange={(e) => setMedicoTratante(e.target.value)}
                     className="w-full text-xs font-bold px-2.5 py-1.5 bg-white border border-purple-300 rounded-lg uppercase"
@@ -371,7 +393,7 @@ export const RecordModal: React.FC<RecordModalProps> = ({
                   </label>
                   <input
                     type="text"
-                    placeholder="EJ. HERNIA DISCAL LUMBAR"
+                    placeholder="EJ. PIEZA HISTOPATOLOGICA"
                     value={descripcionBiopsia}
                     onChange={(e) => setDescripcionBiopsia(e.target.value)}
                     className="w-full text-xs font-bold px-2.5 py-1.5 bg-white border border-purple-300 rounded-lg uppercase"

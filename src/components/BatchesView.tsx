@@ -334,7 +334,7 @@ export const BatchesView: React.FC<BatchesViewProps> = ({
                     onClick={() => onOpenOfficialReport(
                       batch.batchRecords,
                       stageConfig?.officialDocTitle || 'ENTREGA DE EXPEDIENTES A FACTURACION',
-                      batch.ars === 'TODAS' ? 'ARS SENASA' : batch.ars,
+                      batch.ars,
                       batch.fechaEntrega || batch.fechaCiclo
                     )}
                     className="p-1.5 bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 rounded-lg transition-colors cursor-pointer"

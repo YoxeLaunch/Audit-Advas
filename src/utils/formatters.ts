@@ -200,20 +200,8 @@ export function canChangeStage(userOrRole: User | UserRole, targetStageId: AnySt
 }
 
 export function normalizeArsName(ars: string | undefined | null): string {
-  if (!ars) return 'SENASA';
-  const upper = ars.toUpperCase().trim();
-  if (upper.includes('SENASA')) return 'SENASA';
-  if (upper.includes('PRIMERA')) return 'PRIMERA';
-  if (upper.includes('HUMANO')) return 'HUMANO';
-  if (upper.includes('UNIVERSAL') || upper.includes('MAPFRE')) return 'UNIVERSAL';
-  if (upper.includes('SEMMA')) return 'SEMMA';
-  if (upper.includes('MONUMENTAL')) return 'MONUMENTAL';
-  if (upper.includes('RESERVA')) return 'ARS RESERVAS';
-  if (upper.includes('FUTURO')) return 'FUTURO';
-  if (upper.includes('RENACER')) return 'RENACER';
-  if (upper.includes('IDOPPRIL')) return 'IDOPPRIL';
-  if (upper.includes('UAS')) return 'UAS';
-  return upper;
+  if (!ars || !ars.trim()) return 'SIN ASEGURADORA';
+  return ars.toUpperCase().trim();
 }
 
 export interface RecordSlaStatus {
@@ -233,7 +221,7 @@ export function calculateRecordSla(
   arsConfigMap: Record<string, number> = {}
 ): RecordSlaStatus {
   const normArs = normalizeArsName(ars);
-  const diasVigencia = arsConfigMap[normArs] || (normArs === 'PRIMERA' || normArs === 'HUMANO' || normArs === 'UNIVERSAL' ? 90 : 60);
+  const diasVigencia = arsConfigMap[normArs] || 60;
 
   if (!fechaCierre) {
     return {

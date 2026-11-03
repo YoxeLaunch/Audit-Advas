@@ -42,7 +42,7 @@ export const CreateBatchModal: React.FC<CreateBatchModalProps> = ({
   const [tipo, setTipo] = useState<RecordType>(defaultType);
   const [codigo, setCodigo] = useState(`LOTE-${tipo === 'EXPEDIENTE' ? 'EXP' : 'EMG'}-${todayStr.replace(/-/g, '')}-01`);
   const [nombre, setNombre] = useState(`Corte Diario de ${tipo === 'EXPEDIENTE' ? 'Expedientes' : 'Emergencias'} (${todayStr})`);
-  const [ars, setArs] = useState('ARS SENASA');
+  const [ars, setArs] = useState('TODAS');
   const [etapa, setEtapa] = useState<AnyStageId>(
     tipo === 'EXPEDIENTE' ? 'RECEPCION' : 'RECEPCION_EMERGENCIA'
   );

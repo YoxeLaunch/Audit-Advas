@@ -31,8 +31,8 @@ export const OfficialRelationModal: React.FC<OfficialRelationModalProps> = ({
   deliveryDate,
   stage = 'ALL',
   auditorName = 'TODOS LOS AUDITORES',
-  deliveredBy = 'Lic. Ana Patricia Martínez (Administrativo)',
-  receivedBy = 'Departamento Receptor / ARS',
+  deliveredBy = 'Área Emisora',
+  receivedBy = 'Departamento Receptor',
   arsConfigMap = {}
 }) => {
   if (!isOpen) return null;
