@@ -47,39 +47,66 @@ export const ThemeCurtainTransition: React.FC<ThemeCurtainTransitionProps> = ({
       >
         {isDarkTarget ? (
           /* ================================================================ */
-          /* MODO OSCURO: MEDIA LUNA SIMPLE DE LADO QUE CIERRA LOS OJOS       */
+          /* MODO OSCURO: MEDIA LUNA DE PERFIL (DE LADO) CON NARIZ, BOCA      */
+          /* DE LADO Y OJO DE PERFIL QUE SE CIERRA                            */
           /* ================================================================ */
           <svg
             viewBox="0 0 140 140"
             className="w-36 h-36 animate-[moonTilt_1.1s_ease-in-out_forwards]"
           >
-            {/* Media luna simple y limpia de lado */}
+            {/* Silueta de media luna de lado con nariz y barbilla en el perfil interior */}
             <path
-              d="M 88 18 C 50 18, 22 46, 22 80 C 22 114, 50 132, 88 132 C 102 132, 114 127, 122 118 C 92 120, 68 100, 68 75 C 68 50, 92 30, 122 32 C 112 22, 100 18, 88 18 Z"
+              d="M 102 16
+                 C 50 14, 20 42, 20 72
+                 C 20 102, 50 126, 102 124
+                 C 82 118, 68 108, 67 96
+                 C 66 90, 66 84, 66 79
+                 C 75 79, 84 76, 84 70
+                 C 84 64, 72 58, 64 52
+                 C 64 36, 80 22, 102 16 Z"
               fill="#FACC15"
             />
 
-            {/* Ojo abierto que se cierra suavemente */}
-            <g
-              style={{ transformOrigin: '48px 68px' }}
-              className="animate-[eyeCloseOpen_0.9s_ease-in-out_forwards]"
-            >
-              <circle cx="48" cy="68" r="4.5" fill="#1E293B" />
-            </g>
-
-            {/* Párpado cerrado simple que aparece al cerrar el ojo */}
+            {/* Línea sutil de definición de la nariz de lado */}
             <path
-              d="M 41 68 Q 48 75 55 68"
+              d="M 64 52 C 72 58, 84 64, 84 70 C 84 76, 75 79, 63 79"
               fill="none"
               stroke="#1E293B"
-              strokeWidth="3.2"
+              strokeWidth="2.6"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+
+            {/* Ojo de perfil (de lado) mirando hacia la derecha, que se cierra */}
+            <g
+              style={{ transformOrigin: '53px 56px' }}
+              className="animate-[eyeCloseOpen_0.9s_ease-in-out_forwards]"
+            >
+              {/* Contorno del ojo visto de lado */}
+              <path
+                d="M 59 52 Q 51 51 46 56 Q 51 60 59 59"
+                fill="none"
+                stroke="#1E293B"
+                strokeWidth="2.6"
+                strokeLinecap="round"
+              />
+              {/* Pupila mirando hacia el frente del perfil (derecha) */}
+              <circle cx="55.5" cy="55.5" r="3" fill="#1E293B" />
+            </g>
+
+            {/* Párpado cerrado de lado (con pestaña hacia el perfil) al cerrar el ojo */}
+            <path
+              d="M 46 56 Q 53 62 61 56"
+              fill="none"
+              stroke="#1E293B"
+              strokeWidth="3"
               strokeLinecap="round"
               className="animate-[eyelidShow_0.9s_ease-in-out_forwards]"
             />
 
-            {/* Sonrisa simple y tranquila */}
+            {/* Boca de lado: nace en el borde del perfil bajo la nariz y sonríe de lado */}
             <path
-              d="M 43 88 Q 50 94 58 88"
+              d="M 66.5 87 Q 55 88 49 82"
               fill="none"
               stroke="#1E293B"
               strokeWidth="3"
